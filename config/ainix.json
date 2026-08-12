@@ -1,0 +1,68 @@
+{
+  "comment": "AINIX Configuration - Customize behavior and safety policies",
+
+  "execution": {
+    "default_mode": "preview",
+    "require_approval": true,
+    "use_containers": true,
+    "preferred_container": "untrusted"
+  },
+
+  "containers": {
+    "enabled": true,
+    "auto_select": true,
+    "default_container": "untrusted",
+    "mapping": {
+      "dev": "use for building, coding",
+      "work": "use for office, browsing work stuff",
+      "untrusted": "use for testing, untrusted code",
+      "net": "internal, for network operations"
+    }
+  },
+
+  "safety": {
+    "enable_rollback": true,
+    "dangerous_operations_require_approval": true,
+    "log_commands": true,
+    "log_path": "/var/log/ainix/commands.log",
+    "timeout_seconds": 300
+  },
+
+  "dangerous_operations": [
+    "rm", "delete", "remove", "uninstall",
+    "dd", "format", "mkfs", "fdisk",
+    "reboot", "shutdown", "halt",
+    "nixos-rebuild switch"
+  ],
+
+  "whitelist": {
+    "enabled": false,
+    "operations": [
+      "nix search",
+      "nix shell",
+      "nix run"
+    ]
+  },
+
+  "learning": {
+    "enabled": true,
+    "store_successful_commands": true,
+    "learn_from_failures": true,
+    "track_performance": true,
+    "data_path": "/var/lib/ainix/learning/"
+  },
+
+  "help": {
+    "show_examples": true,
+    "show_related": true,
+    "enable_web_search": false,
+    "offline_first": true
+  },
+
+  "ui": {
+    "color": true,
+    "emoji": true,
+    "verbose": true,
+    "show_timing": false
+  }
+}
