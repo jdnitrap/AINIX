@@ -13,7 +13,7 @@ class ExecutionMode(Enum):
     DRY_RUN = "dry-run"       # Show what would happen
     PREVIEW = "preview"       # Show exact commands that will run
     EXECUTE = "execute"       # Actually run the commands
-    SAFE = "safe"             # Run in container with rollback
+    SAFE = "safe"             # Run with tracking and optional rollback
 
 @dataclass
 class ExecutionResult:
@@ -23,7 +23,6 @@ class ExecutionResult:
     stderr: str
     command: str
     mode: ExecutionMode
-    container_used: Optional[str] = None
     rollback_available: bool = False
 
 class SafeExecutor:
@@ -47,8 +46,6 @@ class SafeExecutor:
         default_config = {
             "default_mode": "preview",
             "require_approval": True,
-            "use_containers": True,
-            "preferred_container": "untrusted",
             "log_commands": True,
             "enable_rollback": True,
         }
@@ -126,7 +123,6 @@ class SafeExecutor:
     def execute_safe(
         self,
         command: str,
-        container: Optional[str] = None,
         mode: ExecutionMode = ExecutionMode.PREVIEW
     ) -> ExecutionResult:
         """Execute command safely with guardrails."""
@@ -156,10 +152,6 @@ class SafeExecutor:
         if mode == ExecutionMode.DRY_RUN:
             return self.dry_run(command)
 
-        # Use container if specified or if dangerous
-        if container or self.config.get("use_containers"):
-            return self._execute_in_container(command, container or self.config.get("preferred_container"))
-
         # Safe execution mode: run and track
         if mode == ExecutionMode.SAFE:
             return self._execute_with_tracking(command)
@@ -175,36 +167,6 @@ class SafeExecutor:
             command=command,
             mode=mode
         )
-
-    def _execute_in_container(self, command: str, container: str) -> ExecutionResult:
-        """Execute command in an isolated NixQubes container."""
-        try:
-            # This is a stub that would integrate with qubesctl
-            result = subprocess.run(
-                ['echo', f'Would run in container: {container}'],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            return ExecutionResult(
-                success=True,
-                stdout=f"Executing in container '{container}':\n{command}",
-                stderr="",
-                command=command,
-                mode=ExecutionMode.SAFE,
-                container_used=container,
-                rollback_available=True
-            )
-        except subprocess.TimeoutExpired:
-            return ExecutionResult(
-                success=False,
-                stdout="",
-                stderr="Command timed out",
-                command=command,
-                mode=ExecutionMode.SAFE,
-                container_used=container
-            )
 
     def _execute_with_tracking(self, command: str) -> ExecutionResult:
         """Execute with tracking and ability to rollback."""
