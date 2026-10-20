@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -20,7 +20,6 @@ from help.knowledge_base import HelpKnowledgeBase
 
 
 def load_config(config_path=None):
-    """Return dict from config file, or {}."""
     paths = []
     if config_path:
         paths.append(Path(config_path))
@@ -40,7 +39,6 @@ class AINIX:
         self.executor = SafeExecutor(config_path)
         cfg = load_config(config_path)
         chosen = model or cfg.get("model")
-        # model_first: flag wins, then config, default False (docs first)
         if model_first is None:
             self.model_first = bool(cfg.get("model_first", False))
         else:
@@ -54,6 +52,37 @@ class AINIX:
         self.notes_file = self.data_dir / "notes.txt"
         self.cache_dir = self.data_dir / "cache"
 
+    def show_start(self):
+        style = self.detect_style()
+        rebuild = "sudo nixos-rebuild switch --flake .#hostname" if style == "flakes" else "sudo nixos-rebuild switch"
+        print(f"""AINIX start — first steps on NixOS
+
+Your system looks like: {style}
+
+1. Install a package (permanent)
+   Add to configuration.nix:
+     environment.systemPackages = with pkgs; [ firefox ];
+   Then:
+     {rebuild}
+
+   Temporary (this user only):
+     nix profile add nixpkgs#firefox
+
+2. Rebuild after any config change
+   {rebuild}
+
+3. If something breaks, roll back
+   sudo nixos-rebuild switch --rollback
+   Or pick an older generation at boot.
+
+4. Ask AINIX next
+   ainix "How do I enable ssh?"
+   ainix install vim
+   ainix help
+
+Preview never changes the system. Nothing runs unless you pass --execute.
+""")
+
     def show_help(self):
         model = self.knowledge.pick_model() or "none"
         mode = "model-first" if self.model_first else "docs-first"
@@ -61,10 +90,9 @@ class AINIX:
 Mode:  {mode}
 Model: {model}
 
-Set once in ~/.config/ainix/config.json:
-  {{"model": "gemma2:9b", "model_first": true}}
+New here?  ainix start
 
-Or per run:
+Or:
   ainix --model-first "question"
   ainix --docs-first "question"
 
@@ -182,6 +210,9 @@ Default is docs-first. Model is optional.
         if query.lower() in ("help", "--help", "-h"):
             self.show_help()
             return
+        if query.lower() == "start":
+            self.show_start()
+            return
         if query.lower() == "uninstall":
             self.uninstall()
             return
@@ -208,6 +239,9 @@ Default is docs-first. Model is optional.
                 break
             if line.lower() == "help":
                 self.show_help()
+                continue
+            if line.lower() == "start":
+                self.show_start()
                 continue
             class A: pass
             a = A()
