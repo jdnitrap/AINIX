@@ -58,11 +58,11 @@ python3.pkgs.buildPythonApplication {
       Features:
       - Automatic query classification (help vs control)
       - Safe command execution with guardrails
-      - NixQubes container integration
       - Comprehensive knowledge base
       - Dangerous operation detection
+      - Local learning from commands
     '';
-    homepage = "https://github.com/jdnitrap/gobook";
+    homepage = "https://github.com/jdnitrap/AINIX";
     license = licenses.mit;
     maintainers = [ "AINIX Team" ];
     platforms = platforms.linux;

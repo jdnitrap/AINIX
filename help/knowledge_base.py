@@ -81,38 +81,6 @@ Best practice: Define packages in configuration.nix for consistency.
             ]
         )
 
-        # NixQubes Integration
-        self.add_entry(
-            topic="nixqubes-containers",
-            content="""
-NixQubes provides isolated containers like Qubes OS:
-
-Available containers:
-- net: Handles all networking (auto-starts)
-- work: For work applications (Firefox, LibreOffice)
-- dev: For development tools (Git, Rust, Node.js)
-- untrusted: Ephemeral container for testing
-
-Managing containers:
-  qubesctl start <name>     # Start a container
-  qubesctl stop <name>      # Stop a container
-  qubesctl shell <name>     # Open shell in container
-  qubesctl run <name> cmd   # Run command in container
-
-Containers provide security through isolation:
-- Work cannot see Dev
-- Untrusted is completely isolated
-- All internet through Net container
-            """,
-            tags=["security", "containers", "nixqubes"],
-            related_topics=["container-isolation", "network-security"],
-            examples=[
-                "qubesctl start work",
-                "qubesctl shell dev",
-                "qubesctl run work firefox"
-            ]
-        )
-
         # Configuration Files
         self.add_entry(
             topic="nixos-configuration",
@@ -174,14 +142,9 @@ Usage patterns:
    ainix --explain "What does nixos-rebuild switch do?"
    → AINIX provides detailed explanation
 
-4. Use containers:
-   ainix --container dev "Build my project"
-   → AINIX runs in dev container, isolated from main system
-
 Safety features:
 - Preview by default (show what would happen)
 - Confirmation required for dangerous operations
-- Container execution for isolation
 - Rollback support
 - Command history tracking
             """,
@@ -256,7 +219,6 @@ Safety features:
         explanations = {
             "nixos-rebuild": self.get("nixos-rebuild"),
             "nix-env": self.get("nix-package-management"),
-            "qubesctl": self.get("nixqubes-containers"),
             "nix": self.get("nix-package-management"),
         }
 
@@ -274,7 +236,6 @@ if __name__ == "__main__":
     test_queries = [
         "nixos",
         "packages",
-        "containers",
         "rebuild"
     ]
 
