@@ -1,6 +1,14 @@
 # AINIX
 
-Local NixOS assistant. Preview by default. Model is optional.
+A local assistant for NixOS. It answers questions, shows safe command previews, and can generate small Nix snippets. Nothing changes your system unless you explicitly ask.
+
+## What it does
+
+- **Help** — answers NixOS questions from a small knowledge base, real Nix docs, optional web search, and an optional local model
+- **Preview** — shows the command or config line it would run, without running it
+- **Code** — can print Nix, NixOS, or flake snippets for you to copy
+
+It does not edit your config files. A model is optional. It works without one.
 
 ## Install
 
@@ -14,6 +22,49 @@ Then:
 
 ```bash
 ainix help
+```
+
+## Try it
+
+```bash
+ainix "How do I install a package?"
+ainix install firefox
+ainix firefox
+ainix --history
+```
+
+Bare names like `ainix firefox` show the install preview.
+
+## Help order
+
+Default is **docs-first**:
+1. Local knowledge
+2. Nix docs
+3. Web (if online)
+4. Local model only if the above miss
+
+**Model-first** is optional. Set it once:
+
+```bash
+mkdir -p ~/.config/ainix
+echo '{"model": "gemma2:9b", "model_first": true}' > ~/.config/ainix/config.json
+```
+
+Or for one run:
+
+```bash
+ainix --model-first "How do I enable ssh?"
+ainix --docs-first "How do I enable ssh?"
+```
+
+## Optional local model
+
+AINIX does not require a model. If you want one, use Ollama (works with NVIDIA, AMD, or CPU):
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull gemma2:9b
+ainix --model gemma2:9b "How do I enable ssh?"
 ```
 
 ## Uninstall
@@ -30,31 +81,8 @@ Curl install:
 ainix uninstall
 ```
 
-## Usage
+## More
 
-```bash
-ainix "How do I install a package?"
-ainix install firefox
-ainix --history
-ainix --cache-clear
-```
-
-## Help order
-
-Default is **docs-first**: local knowledge, Nix docs, web if online, then local model if needed.
-
-**Model-first** (optional):
-
-```bash
-mkdir -p ~/.config/ainix
-echo '{"model": "gemma2:9b", "model_first": true}' > ~/.config/ainix/config.json
-```
-
-No model is required. Ollama handles NVIDIA, AMD, or CPU if you want one.
-
-## Local model (optional)
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull gemma2:9b
-```
+- `ainix help` — usage
+- `man ainix` — man page
+- `ainix --version` — version
