@@ -6,7 +6,7 @@ A local assistant for NixOS. It answers questions, shows safe command previews, 
 
 - **Help** — answers NixOS questions from a small knowledge base, real Nix docs, optional web search, and an optional local model
 - **Preview** — shows the command or config line it would run, without running it
-- **Code** — can print Nix, NixOS, or flake snippets for you to copy
+- **Start** — a short first-steps guide for new NixOS users
 
 It does not edit your config files. A model is optional. It works without one.
 
@@ -21,19 +21,20 @@ curl -fsSL https://raw.githubusercontent.com/jdnitrap/AINIX/main/install.sh | ba
 Then:
 
 ```bash
-ainix help
+ainix start
 ```
 
 ## Try it
 
 ```bash
+ainix start
 ainix "How do I install a package?"
 ainix install firefox
 ainix firefox
 ainix --history
 ```
 
-Bare names like `ainix firefox` show the install preview.
+`ainix start` walks through install, rebuild, and rollback.
 
 ## Help order
 
@@ -83,6 +84,7 @@ ainix uninstall
 
 ## More
 
+- `ainix start` — first steps
 - `ainix help` — usage
 - `man ainix` — man page
 - `ainix --version` — version
