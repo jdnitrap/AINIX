@@ -22,18 +22,10 @@ in {
       default = {
         execution.default_mode = "preview";
         execution.require_approval = true;
-        execution.use_containers = true;
-        containers.enabled = true;
         safety.enable_rollback = true;
         safety.log_commands = true;
       };
       description = "AINIX configuration settings";
-    };
-
-    enableNixQubesIntegration = mkOption {
-      type = types.bool;
-      default = true;
-      description = "Enable integration with NixQubes containers";
     };
 
     enableLocalLearning = mkOption {
@@ -50,7 +42,7 @@ in {
   };
 
   config = mkIf cfg.enable {
-    environment.systemPackages = [ cfg.package ] ++ (if cfg.enableNixQubesIntegration then [ ] else [ ]);
+    environment.systemPackages = [ cfg.package ];
 
     # Create AINIX directories
     systemd.tmpfiles.rules = mkIf cfg.enableLocalLearning [
@@ -83,15 +75,6 @@ in {
     # Shell alias for easier access
     environment.shellAliases = {
       ainix = "${cfg.package}/bin/ainix";
-    };
-
-    # Integration with NixQubes if available
-    nixqubes.containerIntegration = mkIf cfg.enableNixQubesIntegration {
-      ainixContainer = {
-        enable = true;
-        defaultContainer = "untrusted";
-        allowedContainers = [ "work" "dev" "untrusted" ];
-      };
     };
   };
 

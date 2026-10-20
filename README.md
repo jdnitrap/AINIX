@@ -17,7 +17,7 @@ User Query
 1. **Help First**: Explain what's happening
 2. **Control Second**: Execute safely with guardrails
 3. **Learn Always**: Remember what worked/failed
-4. **Isolation by Default**: Use NixQubes containers for testing/execution
+4. **Safe by Default**: Preview mode, validation, and optional rollback
 
 ## Components
 
@@ -37,13 +37,11 @@ User Query
 - Query routing (help vs control)
 - Safety guardrails and validation
 - Local learning/memory system
-- Integration with NixQubes for isolation
 
 ### Configuration (`config/`)
 - AINIX settings and policies
 - Allowed operations whitelist/blacklist
 - Learning preferences
-- Container integration settings
 
 ## Usage
 
@@ -56,18 +54,15 @@ ainix install firefox
 
 # Show reasoning
 ainix --explain "What would happen if I..."
-
-# Use a specific container for testing
-ainix --container dev "Build my project"
 ```
 
 ## Safety Features
 
-1. **Execution in Containers**: Use NixQubes containers for isolation
-2. **Dry-run by Default**: Show what would happen before doing it
-3. **Rollback Support**: Track system state, enable rollback
-4. **Permission Model**: Different permission levels for different operations
-5. **Audit Trail**: Log all executed commands
+1. **Dry-run / Preview by Default**: Show what would happen before doing it
+2. **Rollback Support**: Track system state, enable rollback
+3. **Permission Model**: Different permission levels for different operations
+4. **Audit Trail**: Log all executed commands
+5. **Dangerous operation detection**: Blocks risky commands unless explicitly approved
 
 ## Learning System
 
@@ -83,7 +78,6 @@ AINIX learns from:
 - Control layer: Under development
 - Core routing: Planned
 - Learning system: Planned
-- NixQubes integration: Ready
 
 ## Next Steps
 
@@ -91,4 +85,3 @@ AINIX learns from:
 2. Build help knowledge base
 3. Implement control execution with guards
 4. Add learning/memory system
-5. Create NixQubes integration
