@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-AINIX Help Layer: Knowledge base with ranked search and external fallback.
+AINIX Help Layer: local knowledge plus real Nix docs.
 """
 
 import subprocess
+import shutil
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
@@ -98,32 +99,25 @@ Preview never changes the system. Execute is logged.
         )
 
     def search(self, query: str, limit: int = 3) -> List[KnowledgeEntry]:
-        """Ranked search. Specific topics beat generic ones."""
         q = query.lower()
         scored: List[Tuple[int, KnowledgeEntry]] = []
-
         for entry in self.knowledge.values():
             score = 0
-            # Strong: tag exact or contained
             for tag in entry.tags:
                 if tag in q:
                     score += 10
                 elif q in tag:
                     score += 5
-            # Topic name
             if entry.topic.replace("-", " ") in q or q in entry.topic:
                 score += 8
-            # Content
             if q in entry.content.lower():
                 score += 2
-            # Prefer package topic for install/package questions
             if entry.topic == "nix-package-management" and any(
                 w in q for w in ("install", "package", "packages")
             ):
                 score += 15
             if score > 0:
                 scored.append((score, entry))
-
         scored.sort(key=lambda x: -x[0])
         return [e for _, e in scored[:limit]]
 
@@ -141,33 +135,57 @@ Preview never changes the system. Execute is logged.
                     return entry.content
         return "No explanation available."
 
-    def lookup_external(self, query: str) -> Optional[str]:
-        """Try real Nix tools. Returns None if tools missing or nothing found."""
-        # Option path
-        if "." in query and not query.startswith("http"):
-            try:
-                r = subprocess.run(
-                    ["nixos-option", query],
-                    capture_output=True, text=True, timeout=10
-                )
-                if r.returncode == 0 and r.stdout.strip():
-                    return f"nixos-option {query}:\n\n{r.stdout[:1500]}"
-            except FileNotFoundError:
-                return "nixos-option not found on PATH."
-            except subprocess.TimeoutExpired:
-                return "nixos-option timed out."
+    def _run(self, cmd: List[str], timeout: int = 15) -> Optional[str]:
+        if not shutil.which(cmd[0]):
+            return None
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (subprocess.TimeoutExpired, Exception):
+            return None
+        return None
+
+    def lookup_docs(self, query: str) -> str:
+        """Always consult real Nix docs. Returns a combined text block."""
+        sections = []
+        q = query.strip()
+
+        # Option path (services.foo.enable, boot.loader..., etc.)
+        if "." in q and not q.startswith("http"):
+            out = self._run(["nixos-option", q], timeout=10)
+            if out:
+                sections.append(f"nixos-option {q}\n\n{out[:2000]}")
 
         # Package search
-        try:
-            r = subprocess.run(
-                ["nix", "search", "nixpkgs", query, "--no-update-lock-file"],
-                capture_output=True, text=True, timeout=20
+        # Strip common question words for a cleaner search term
+        search_term = q
+        for w in ("how", "do", "i", "install", "a", "the", "package", "packages", "what", "is"):
+            search_term = search_term.replace(w, " ")
+        search_term = " ".join(search_term.split())
+        if search_term and len(search_term) < 60:
+            out = self._run(
+                ["nix", "search", "nixpkgs", search_term, "--no-update-lock-file"],
+                timeout=25
             )
-            if r.returncode == 0 and r.stdout.strip():
-                return f"nix search nixpkgs {query}:\n\n{r.stdout[:1500]}"
-        except FileNotFoundError:
-            return "nix not found on PATH. You can still run: nix search nixpkgs " + query
-        except subprocess.TimeoutExpired:
-            return "nix search timed out."
+            if out:
+                sections.append(f"nix search nixpkgs {search_term}\n\n{out[:2000]}")
 
-        return None
+        # man page for the first word if it looks like a command
+        first = q.split()[0] if q.split() else ""
+        if first and shutil.which("man"):
+            out = self._run(["man", "-P", "cat", first], timeout=5)
+            if out:
+                sections.append(f"man {first}\n\n{out[:1200]}")
+
+        if not sections:
+            missing = []
+            if not shutil.which("nixos-option"):
+                missing.append("nixos-option")
+            if not shutil.which("nix"):
+                missing.append("nix")
+            if missing:
+                return "Nix docs tools not on PATH: " + ", ".join(missing)
+            return "No matching Nix docs found."
+
+        return "\n\n---\n\n".join(sections)
