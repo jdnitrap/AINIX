@@ -1,46 +1,33 @@
 # AINIX Installation
 
-## On any NixOS machine (flake)
-
-Add the input and enable the module:
-
-```nix
-# flake.nix
-{
-  inputs.ainix.url = "github:jdnitrap/AINIX";
-
-  outputs = { self, nixpkgs, ainix, ... }:
-  {
-    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
-      modules = [
-        ainix.nixosModules.default
-        ./configuration.nix
-      ];
-    };
-  };
-}
-```
-
-```nix
-# configuration.nix
-{
-  services.ainix.enable = true;
-}
-```
-
-Then rebuild.
-
-## Run without installing
+## Per-user (no config changes)
 
 ```bash
-nix run github:jdnitrap/AINIX -- "How do I install a package?"
+nix profile add github:jdnitrap/AINIX --no-write-lock-file
 ```
 
-## Usage
+(`install` is a deprecated alias for `add`.)
+
+Remove later with:
+```bash
+nix profile remove ainix
+```
+
+## One-shot
 
 ```bash
-ainix "How do I install a package?"
-ainix install firefox          # preview by default
-ainix --explain nixos-rebuild
-ainix install firefox --execute
+nix run github:jdnitrap/AINIX --no-write-lock-file -- "How do I install a package?"
 ```
+
+## System-wide (flake)
+
+```nix
+inputs.ainix.url = "github:jdnitrap/AINIX";
+# then
+ainix.nixosModules.default
+services.ainix.enable = true;
+```
+
+## Why --no-write-lock-file
+
+The repo has no committed flake.lock yet. Nix tries to write one on install and fails on a remote flake. The flag skips that.
