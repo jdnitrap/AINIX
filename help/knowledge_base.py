@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-AINIX Help Layer: local knowledge, cached Nix docs, optional Ollama.
+AINIX Help Layer: local knowledge, Nix docs, optional web, optional local model.
+Hardware-agnostic: no CUDA/ROCm assumptions. Model is optional.
 """
 
 import subprocess
 import shutil
 import json
 import hashlib
+import socket
 from pathlib import Path
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
@@ -20,8 +22,9 @@ class KnowledgeEntry:
     examples: List[str]
 
 class HelpKnowledgeBase:
-    def __init__(self):
+    def __init__(self, model: Optional[str] = None):
         self.knowledge = {}
+        self.model = model  # explicit override; None = auto or none
         self.cache_dir = Path.home() / ".local" / "share" / "ainix" / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_core_knowledge()
@@ -32,19 +35,13 @@ class HelpKnowledgeBase:
             content="""
 Ways to install a package:
 
-1. Per-user (temporary / profile):
-   nix profile add nixpkgs#firefox
-
-2. Temporary shell:
-   nix shell nixpkgs#firefox
-
-3. Declarative (preferred for permanence):
-   environment.systemPackages = with pkgs; [ firefox ];
-   then: sudo nixos-rebuild switch
+1. Per-user: nix profile add nixpkgs#firefox
+2. Temporary: nix shell nixpkgs#firefox
+3. Declarative: environment.systemPackages = with pkgs; [ firefox ];
 
 Preview in AINIX never changes the system.
             """,
-            tags=["packages", "install", "package", "nix", "installation"],
+            tags=["packages", "install", "package", "nix"],
             related_topics=["nixos-rebuild"],
             examples=["nix profile add nixpkgs#firefox"]
         )
@@ -52,46 +49,23 @@ Preview in AINIX never changes the system.
             topic="nixos-rebuild",
             content="""
 Activate configuration changes:
-
-- build: build only
-- switch: build and activate
-- boot: activate on next boot
-- test: temporary (reverts on reboot)
-
   sudo nixos-rebuild switch
   sudo nixos-rebuild test
+  sudo nixos-rebuild switch --rollback
             """,
-            tags=["nixos", "rebuild", "system", "configuration"],
+            tags=["nixos", "rebuild", "system"],
             related_topics=["nix-package-management"],
             examples=["nixos-rebuild switch"]
-        )
-        self.add_entry(
-            topic="generations-rollback",
-            content="""
-NixOS keeps generations. Rollback with:
-
-  sudo nixos-rebuild switch --rollback
-
-or pick a generation from the boot menu.
-            """,
-            tags=["rollback", "generation", "generations"],
-            related_topics=["nixos-rebuild"],
-            examples=["nixos-rebuild switch --rollback"]
         )
         self.add_entry(
             topic="ainix-usage",
             content="""
 AINIX is a local NixOS assistant.
-
-Help:    ainix "How do I install a package?"
-Preview: ainix install firefox
-Execute: ainix install firefox --execute
-
-Preview never changes the system.
+Help, preview, and optional local model. Model is not required.
             """,
             tags=["ainix", "usage"],
             related_topics=[],
-            examples=["ainix install firefox"]
+            examples=["ainix help"]
         )
 
     def add_entry(self, topic, content, tags, related_topics, examples):
@@ -102,16 +76,14 @@ Preview never changes the system.
 
     def search(self, query: str, limit: int = 3) -> List[KnowledgeEntry]:
         q = query.lower()
-        scored: List[Tuple[int, KnowledgeEntry]] = []
+        scored = []
         for entry in self.knowledge.values():
             score = 0
             for tag in entry.tags:
                 if tag in q:
                     score += 10
-            if entry.topic.replace("-", " ") in q or q in entry.topic:
-                score += 8
             if entry.topic == "nix-package-management" and any(
-                w in q for w in ("install", "package", "packages")
+                w in q for w in ("install", "package")
             ):
                 score += 15
             if score > 0:
@@ -122,26 +94,23 @@ Preview never changes the system.
     def list_topics(self) -> List[str]:
         return sorted(self.knowledge.keys())
 
-    def get(self, topic: str) -> Optional[KnowledgeEntry]:
+    def get(self, topic: str):
         return self.knowledge.get(topic.lower())
 
     def explain_command(self, command: str) -> str:
-        for prefix in ("nixos-rebuild", "nix-env", "nix"):
+        for prefix in ("nixos-rebuild", "nix"):
             if command.startswith(prefix):
                 entry = self.get(prefix if prefix != "nix" else "nix-package-management")
                 if entry:
                     return entry.content
         return "No explanation available."
 
-    def _cache_key(self, query: str) -> Path:
-        h = hashlib.sha256(query.encode()).hexdigest()[:16]
-        return self.cache_dir / f"{h}.txt"
-
-    def _summarize(self, text: str, max_lines: int = 25) -> str:
-        lines = text.strip().splitlines()
-        if len(lines) <= max_lines:
-            return text.strip()
-        return "\n".join(lines[:max_lines]) + f"\n... ({len(lines) - max_lines} more lines)"
+    def is_online(self) -> bool:
+        try:
+            socket.create_connection(("1.1.1.1", 53), timeout=2)
+            return True
+        except OSError:
+            return False
 
     def _run(self, cmd: List[str], timeout: int = 15) -> Optional[str]:
         if not shutil.which(cmd[0]):
@@ -155,65 +124,106 @@ Preview never changes the system.
         return None
 
     def lookup_docs(self, query: str) -> str:
-        cache_file = self._cache_key(query)
+        cache_file = self.cache_dir / (hashlib.sha256(query.encode()).hexdigest()[:16] + ".txt")
         if cache_file.exists():
             return cache_file.read_text() + "\n(cached)"
 
         sections = []
         q = query.strip()
-
         if "." in q and not q.startswith("http"):
             out = self._run(["nixos-option", q], timeout=10)
             if out:
-                sections.append(f"[nixos-option] {q}\n\n{self._summarize(out)}")
+                sections.append(f"[nixos-option] {q}\n\n{out[:1500]}")
 
         search_term = q
-        for w in ("how", "do", "i", "install", "a", "the", "package", "packages", "what", "is"):
+        for w in ("how", "do", "i", "install", "a", "the", "package", "what", "is"):
             search_term = search_term.replace(w, " ")
         search_term = " ".join(search_term.split())
         if search_term and len(search_term) < 60:
-            out = self._run(
-                ["nix", "search", "nixpkgs", search_term, "--no-update-lock-file"],
-                timeout=25
-            )
+            out = self._run(["nix", "search", "nixpkgs", search_term, "--no-update-lock-file"], timeout=25)
             if out:
-                sections.append(f"[nix search] {search_term}\n\n{self._summarize(out)}")
-
-        first = q.split()[0] if q.split() else ""
-        if first and shutil.which("man"):
-            out = self._run(["man", "-P", "cat", first], timeout=5)
-            if out:
-                sections.append(f"[man] {first}\n\n{self._summarize(out, 15)}")
+                sections.append(f"[nix search] {search_term}\n\n{out[:1500]}")
 
         if not sections:
-            missing = []
-            if not shutil.which("nixos-option"):
-                missing.append("nixos-option")
-            if not shutil.which("nix"):
-                missing.append("nix")
-            if missing:
-                return "Nix docs tools not on PATH: " + ", ".join(missing)
             return "No matching Nix docs found."
-
         result = "\n\n---\n\n".join(sections)
         cache_file.write_text(result)
         return result
 
-    def ollama_fallback(self, query: str) -> Optional[str]:
-        """Optional local model. Returns None if Ollama is unavailable."""
+    def web_search(self, query: str) -> Optional[str]:
+        """Search the web if online. Returns snippets or None."""
+        if not self.is_online():
+            return None
+        if not shutil.which("curl"):
+            return None
+        # DuckDuckGo HTML lite — no API key
+        url = "https://html.duckduckgo.com/html/?q=" + query.replace(" ", "+") + "+nixos"
+        try:
+            r = subprocess.run(
+                ["curl", "-fsSL", "-A", "AINIX", url],
+                capture_output=True, text=True, timeout=15
+            )
+            if r.returncode != 0 or not r.stdout:
+                return None
+            # Crude extract of result snippets
+            lines = []
+            for line in r.stdout.splitlines():
+                if "result__snippet" in line or "result__a" in line:
+                    text = line.split(">", 1)[-1].split("<", 1)[0].strip()
+                    if text and len(text) > 20:
+                        lines.append(text)
+                if len(lines) >= 5:
+                    break
+            if lines:
+                return "\n".join(f"- {t}" for t in lines)
+        except (subprocess.TimeoutExpired, Exception):
+            return None
+        return None
+
+    def list_ollama_models(self) -> List[str]:
         if not shutil.which("ollama"):
+            return []
+        out = self._run(["ollama", "list"], timeout=10)
+        if not out:
+            return []
+        models = []
+        for line in out.splitlines()[1:]:
+            parts = line.split()
+            if parts:
+                models.append(parts[0])
+        return models
+
+    def pick_model(self) -> Optional[str]:
+        """Explicit model, else smallest available, else None."""
+        if self.model:
+            return self.model
+        models = self.list_ollama_models()
+        if not models:
+            return None
+        # Prefer smaller class names if present
+        prefer = ("gemma2:2b", "gemma2:9b", "qwen2.5:7b", "llama3.2", "llama3.1:8b", "phi3")
+        for p in prefer:
+            for m in models:
+                if p in m:
+                    return m
+        return models[0]
+
+    def ollama_fallback(self, query: str) -> Optional[str]:
+        """Optional local model. No GPU assumptions. Returns None if unavailable."""
+        model = self.pick_model()
+        if not model or not shutil.which("ollama"):
             return None
         prompt = (
-            "You are a NixOS assistant. Answer briefly using NixOS conventions. "
+            "You are a NixOS assistant. Answer briefly. "
             "Do not invent options. If unsure, say so.\n\nQuestion: " + query
         )
         try:
             r = subprocess.run(
-                ["ollama", "run", "llama3", prompt],
-                capture_output=True, text=True, timeout=60
+                ["ollama", "run", model, prompt],
+                capture_output=True, text=True, timeout=90
             )
             if r.returncode == 0 and r.stdout.strip():
-                return r.stdout.strip()
+                return f"[{model}]\n{r.stdout.strip()}"
         except (subprocess.TimeoutExpired, Exception):
             return None
         return None
