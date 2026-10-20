@@ -1,30 +1,39 @@
-# AINIX Installation Guide
+# AINIX Installation
 
-## Requirements
+## On any NixOS machine (flake)
 
-- NixOS (recent)
-- Python 3.8+
-
-## NixOS Module
-
-Add the module to your flake and enable it:
+Add the input and enable the module:
 
 ```nix
-services.ainix = {
-  enable = true;
-  enableLocalLearning = true;
-  logLevel = "info";
-};
+# flake.nix
+{
+  inputs.ainix.url = "github:jdnitrap/AINIX";
+
+  outputs = { self, nixpkgs, ainix, ... }:
+  {
+    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        ainix.nixosModules.default
+        ./configuration.nix
+      ];
+    };
+  };
+}
+```
+
+```nix
+# configuration.nix
+{
+  services.ainix.enable = true;
+}
 ```
 
 Then rebuild.
 
-## Direct / Development
+## Run without installing
 
 ```bash
-git clone https://github.com/jdnitrap/AINIX.git
-cd AINIX
-python3 ainix.py "How do I install a package?"
+nix run github:jdnitrap/AINIX -- "How do I install a package?"
 ```
 
 ## Usage
@@ -34,16 +43,4 @@ ainix "How do I install a package?"
 ainix install firefox          # preview by default
 ainix --explain nixos-rebuild
 ainix install firefox --execute
-```
-
-## Configuration
-
-Edit `config/ainix.json` or `~/.config/ainix/ainix.json` for execution mode, safety, and learning preferences.
-
-## Testing
-
-```bash
-python3 tests/test_router.py
-python3 tests/test_executor.py
-python3 tests/test_help.py
 ```
