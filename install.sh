@@ -28,15 +28,24 @@ do
   fetch "$f" "$LIB/$f"
 done
 
-cat > "$DEST/ainix" << EOF
+# Launcher finds python3, python, or common Nix paths
+cat > "$DEST/ainix" << 'EOF'
 #!/usr/bin/env bash
-export PYTHONPATH="${LIB}:\${PYTHONPATH:-}"
-exec python3 "${LIB}/ainix.py" "\$@"
+LIB="${HOME}/.local/share/ainix/lib"
+export PYTHONPATH="${LIB}:${PYTHONPATH:-}"
+
+for cmd in python3 python /run/current-system/sw/bin/python3 /run/current-system/sw/bin/python; do
+  if command -v "$cmd" >/dev/null 2>&1 || [[ -x "$cmd" ]]; then
+    exec "$cmd" "${LIB}/ainix.py" "$@"
+  fi
+done
+
+echo "ainix: python3 not found. Install Python or add it to PATH." >&2
+exit 1
 EOF
 
 chmod +x "$DEST/ainix" "$LIB/ainix.py"
 
-# Ensure ~/.local/bin is on PATH for future shells
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 for rc in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
   if [[ -f "$rc" ]] && ! grep -q '.local/bin' "$rc" 2>/dev/null; then
@@ -45,7 +54,6 @@ for rc in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
   fi
 done
 
-# Use it in this shell if possible
 export PATH="$HOME/.local/bin:$PATH"
 
 echo ""
