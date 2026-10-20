@@ -36,5 +36,19 @@ EOF
 
 chmod +x "$DEST/ainix" "$LIB/ainix.py"
 
+# Ensure ~/.local/bin is on PATH for future shells
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+for rc in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
+  if [[ -f "$rc" ]] && ! grep -q '.local/bin' "$rc" 2>/dev/null; then
+    echo "$PATH_LINE" >> "$rc"
+    echo "Added PATH to $rc"
+  fi
+done
+
+# Use it in this shell if possible
+export PATH="$HOME/.local/bin:$PATH"
+
+echo ""
 echo "Installed to ${DEST}/ainix"
-echo "Ensure ${DEST} is on your PATH, then: ainix help"
+echo "Open a new terminal, or run: source ~/.bashrc"
+echo "Then: ainix help"
