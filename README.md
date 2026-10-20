@@ -2,21 +2,14 @@
 
 Local NixOS assistant. Preview by default.
 
-## Install from anywhere (no Nix)
+## Install (no clone, no Nix)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jdnitrap/AINIX/main/install.sh | bash
 ```
 
-Or:
-
-```bash
-git clone https://github.com/jdnitrap/AINIX.git
-cd AINIX
-./install.sh
-```
-
-Both put `ainix` in `~/.local/bin`. No `nix profile`, no `nix run`.
+That downloads the files and puts `ainix` in `~/.local/bin`.
+No git clone, no `nix profile`, no `nix run`.
 
 Make sure `~/.local/bin` is on your PATH, then:
 
