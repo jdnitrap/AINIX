@@ -61,8 +61,8 @@ class AINIX:
         query: str,
         subject: str = None,
         explain: bool = False,
-        container: str = None,
-        dry_run: bool = False
+        dry_run: bool = False,
+        execute: bool = False
     ):
         """Handle a control/execution query."""
         if explain:
@@ -76,22 +76,18 @@ class AINIX:
         print("⚙️  Control System")
         print("-" * 40)
 
-        # Determine container
-        extracted_container = QueryRouter.extract_container_name(query)
-        container = extracted_container or container
-
         # Determine execution mode
         if dry_run:
             mode = ExecutionMode.DRY_RUN
+        elif execute:
+            mode = ExecutionMode.EXECUTE
         else:
             mode = ExecutionMode.PREVIEW
 
         # Execute safely
         print(f"📋 Executing: {query}")
-        if container:
-            print(f"🔒 Container: {container}")
 
-        result = self.executor.execute_safe(query, container=container, mode=mode)
+        result = self.executor.execute_safe(query, mode=mode)
 
         if result.success:
             print(f"\n✅ {result.mode.value.upper()}")
@@ -114,7 +110,7 @@ class AINIX:
         else:
             # Remove control flags from query for routing
             clean_query = query
-            for flag in ['--execute', '-x', '--dry-run', '--explain', '--container', '-c']:
+            for flag in ['--execute', '-x', '--dry-run', '--explain']:
                 clean_query = clean_query.replace(flag, '').strip()
 
             # Classify query
@@ -125,7 +121,7 @@ class AINIX:
 
         # Clean query for processing
         clean_query = query
-        for flag in ['--execute', '-x', '--dry-run', '--explain', '--container', '-c']:
+        for flag in ['--execute', '-x', '--dry-run', '--explain']:
             clean_query = clean_query.replace(flag, '').strip()
 
         if query_type == QueryType.HELP:
@@ -135,8 +131,7 @@ class AINIX:
             self.handle_control_query(
                 clean_query,
                 subject,
-                explain=True,
-                container=args.container
+                explain=True
             )
 
         elif query_type == QueryType.CONTROL:
@@ -144,8 +139,8 @@ class AINIX:
                 clean_query,
                 subject,
                 explain=False,
-                container=args.container,
-                dry_run=args.dry_run
+                dry_run=args.dry_run,
+                execute=args.execute
             )
 
         else:
@@ -167,8 +162,8 @@ Examples:
   ainix "How do I install Rust?"
   ainix install firefox
   ainix --explain nixos-rebuild
-  ainix --container dev "nix build"
   ainix --dry-run update
+  ainix install firefox --execute
         """
     )
 
@@ -177,11 +172,6 @@ Examples:
         "--explain",
         action="store_true",
         help="Show detailed explanation of command"
-    )
-    parser.add_argument(
-        "--container", "-c",
-        metavar="NAME",
-        help="Execute in specified container (work, dev, untrusted, net)"
     )
     parser.add_argument(
         "--dry-run",
