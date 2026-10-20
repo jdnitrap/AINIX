@@ -7,7 +7,7 @@ import sys
 import argparse
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -95,12 +95,29 @@ class AINIX:
         else:
             print(result.stderr or "Failed")
 
+    def _is_bare_package(self, query: str) -> bool:
+        """Single word that isn't a control keyword → treat as package name."""
+        parts = query.split()
+        if len(parts) != 1:
+            return False
+        word = parts[0].lower()
+        if word in QueryRouter.CONTROL_KEYWORDS or word in QueryRouter.HELP_KEYWORDS:
+            return False
+        if word.startswith("-") or "." in word:
+            return False
+        return True
+
     def handle_query(self, query: str, args: argparse.Namespace):
         if args.explain:
             query_type = QueryType.EXPLAIN
             subject = None
         else:
             query_type, subject = self.router.classify(query)
+
+        # Bare package name (firefox, git, vim, ...) → install preview
+        if self._is_bare_package(query) and query_type != QueryType.EXPLAIN:
+            query = f"install {query}"
+            query_type = QueryType.CONTROL
 
         if not self.quiet and not self.raw:
             print(f"\nAINIX · {query_type.value}")
@@ -115,7 +132,6 @@ class AINIX:
                 execute=args.execute, yes=getattr(args, "yes", False)
             )
         else:
-            # Bare names default to help
             self.handle_help_query(query, subject)
 
     def interactive(self):
@@ -135,7 +151,6 @@ class AINIX:
             if line.lower() == "list":
                 print("\n".join(self.knowledge.list_topics()))
                 continue
-            # Reuse a minimal args-like object
             class A: pass
             a = A()
             a.explain = False
@@ -150,6 +165,7 @@ class AINIX:
 Examples:
   ainix "How do I install a package?"
   ainix install firefox
+  ainix firefox
   ainix --explain nixos-rebuild
   ainix --list
   ainix            (interactive)
