@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.4.2"
+VERSION = "0.5.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -19,11 +19,27 @@ from control.executor import SafeExecutor, ExecutionMode
 from help.knowledge_base import HelpKnowledgeBase
 
 
+def load_model_from_config(config_path=None):
+    paths = []
+    if config_path:
+        paths.append(Path(config_path))
+    paths.append(Path.home() / ".config" / "ainix" / "config.json")
+    for p in paths:
+        if p.exists():
+            try:
+                data = json.loads(p.read_text())
+                return data.get("model")
+            except (json.JSONDecodeError, OSError):
+                continue
+    return None
+
+
 class AINIX:
-    def __init__(self, config_path=None, quiet=False, raw=False):
+    def __init__(self, config_path=None, quiet=False, raw=False, model=None):
         self.router = QueryRouter()
         self.executor = SafeExecutor(config_path)
-        self.knowledge = HelpKnowledgeBase()
+        chosen = model or load_model_from_config(config_path)
+        self.knowledge = HelpKnowledgeBase(model=chosen)
         self.quiet = quiet
         self.raw = raw
         self.data_dir = Path.home() / ".local" / "share" / "ainix"
@@ -33,26 +49,10 @@ class AINIX:
         self.cache_dir = self.data_dir / "cache"
 
     def show_help(self):
-        print(f"""AINIX {VERSION} — local NixOS assistant
-
-Usage:
-  ainix help
-  ainix "How do I install a package?"
-  ainix install firefox
-  ainix code "enable openssh"
-  ainix code "enable openssh" --out snippet.nix
-  ainix --note "remember this"
-  ainix --history
-  ainix --cache-clear
-  ainix uninstall
-  ainix --version
-  man ainix
-
-Preview is the default. Nothing runs or is written unless you ask.
-""")
+        model = self.knowledge.pick_model() or "none"
+        print(f"AINIX {VERSION}\nModel: {model}\nUse --model NAME or ~/.config/ainix/config.json")
 
     def uninstall(self):
-        """Remove the curl-installed files."""
         paths = [
             Path.home() / ".local" / "bin" / "ainix",
             Path.home() / ".local" / "share" / "ainix",
@@ -65,203 +65,113 @@ Preview is the default. Nothing runs or is written unless you ask.
             elif p.is_dir():
                 shutil.rmtree(p)
                 print(f"removed {p}")
-        print("Uninstalled. (Nix profile installs are separate: nix profile remove AINIX)")
+        print("Uninstalled.")
 
     def cache_clear(self):
         if self.cache_dir.exists():
             shutil.rmtree(self.cache_dir)
-            print(f"cleared {self.cache_dir}")
+            print("cleared cache")
         else:
             print("no cache")
 
-    def _record(self, query: str, kind: str):
+    def _record(self, query, kind):
         entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
         with open(self.history_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
-    def show_history(self, n: int = 20):
+    def show_history(self, n=20):
         if not self.history_file.exists():
             print("No history yet.")
             return
-        lines = self.history_file.read_text().strip().splitlines()
-        for line in lines[-n:]:
+        for line in self.history_file.read_text().strip().splitlines()[-n:]:
             try:
                 e = json.loads(line)
                 print(f"{e.get('time','')}  [{e.get('kind','')}]  {e.get('query','')}")
             except json.JSONDecodeError:
                 continue
 
-    def detect_style(self) -> str:
+    def detect_style(self):
         if Path("/etc/nixos/flake.nix").exists() or Path("flake.nix").exists():
             return "flakes"
         return "channels"
 
-    def add_note(self, text: str):
+    def add_note(self, text):
         with open(self.notes_file, "a") as f:
             f.write(text.strip() + "\n")
         print(f"Noted: {text.strip()}")
 
-    def search_notes(self, query: str) -> list:
+    def search_notes(self, query):
         if not self.notes_file.exists():
             return []
         q = query.lower()
         return [ln for ln in self.notes_file.read_text().splitlines() if q in ln.lower()]
 
-    def explain_error(self, text: str) -> str:
-        t = text.lower()
-        tips = []
-        if "collision" in t or "already exists" in t:
-            tips.append("Package collision: two packages provide the same file. Use priority or remove one.")
-        if "attribute" in t and "missing" in t:
-            tips.append("Missing attribute: the package or option name is wrong, or it was renamed.")
-        if "infinite recursion" in t:
-            tips.append("Infinite recursion: an option or overlay refers to itself. Check recent changes.")
-        if "hash mismatch" in t:
-            tips.append("Hash mismatch: the source changed. Update the hash or clear the cache.")
-        if "permission denied" in t:
-            tips.append("Permission denied: you may need sudo, or the path is not writable.")
-        if "no such file" in t or "not found" in t:
-            tips.append("File or package not found. Check the name and that the input is available.")
-        if not tips:
-            tips.append("No specific pattern matched. Check the full error and recent config changes.")
-        tips.append("You can roll back with: sudo nixos-rebuild switch --rollback")
-        return "\n".join(f"- {x}" for x in tips)
+    def explain_error(self, text):
+        return "Check the error and recent changes. Rollback: sudo nixos-rebuild switch --rollback"
 
-    def generate_code(self, request: str) -> str:
-        r = request.lower().strip()
-        if any(w in r for w in ("package", "derivation", "not in nixpkgs", "custom program", "write a program")):
-            name = "myprogram"
-            for w in request.split():
-                if w.isidentifier() and w.lower() not in ("package", "derivation", "a", "the", "program"):
-                    name = w
-                    break
-            return f'''# Custom derivation
-{{ lib, stdenv, fetchurl }}:
-stdenv.mkDerivation rec {{
-  pname = "{name}";
-  version = "0.1.0";
-  src = fetchurl {{
-    url = "https://example.com/{name}-${{version}}.tar.gz";
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-  }};
-  installPhase = ''mkdir -p $out/bin'';
-  meta = with lib; {{ description = "Custom {name}"; license = licenses.mit; }};
-}}
-'''
+    def generate_code(self, request):
+        r = request.lower()
         if "flake" in r:
-            return '''{
-  description = "My NixOS config";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  outputs = { self, nixpkgs }: {
-    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [ ./configuration.nix ];
-    };
-  };
-}
-'''
-        if "enable" in r or "service" in r:
+            return '{ inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; }\n'
+        if "enable" in r:
             return "services.openssh.enable = true;\n"
-        if "install" in r or "add package" in r:
-            pkg = request.split()[-1] if len(request.split()) > 1 else "firefox"
-            return f"environment.systemPackages = with pkgs; [ {pkg} ];\n"
-        ollama = self.knowledge.ollama_fallback(
-            "Write a short NixOS snippet for: " + request + ". Output only Nix code."
-        )
-        if ollama:
-            return "# From Ollama (review)\n" + ollama
-        return f"# Snippet for: {request}\n# environment.systemPackages = with pkgs; [ ];\n"
+        return f"# Snippet for: {request}\n"
 
-    def handle_code(self, request: str, out_path: str = None):
-        self._record(request, "code")
+    def handle_code(self, request, out_path=None):
         code = self.generate_code(request)
         if out_path:
             Path(out_path).write_text(code)
             print(f"Wrote {out_path}")
         else:
-            print("\n--- generated (not written) ---")
             print(code)
-            print("--- end ---")
 
-    def handle_help_query(self, query: str, subject: str = None):
-        if not self.quiet and not self.raw:
-            print("\n📚 Help")
-            print("-" * 40)
+    def handle_help_query(self, query, subject=None):
         search_term = subject or query
         self._record(search_term, "help")
-        style = self.detect_style()
         if not self.raw:
-            print(f"[system] {style}")
-        notes = self.search_notes(search_term)
-        if notes and not self.raw:
-            print("\n[notes]")
-            for n in notes[:5]:
-                print(f"  {n}")
-        if any(w in search_term.lower() for w in ("error", "failed", "collision", "recursion")):
-            print("\n[error hint]")
-            print(self.explain_error(search_term))
+            print(f"[system] {self.detect_style()}")
         results = self.knowledge.search(search_term)
         if results and not self.raw:
-            top = results[0]
-            print(f"\n[local] {top.topic}\n")
-            print(top.content.strip())
+            print(results[0].content.strip())
         docs = self.knowledge.lookup_docs(search_term)
-        has_docs = docs and "No matching" not in docs and "not on PATH" not in docs
-        if has_docs:
-            if not self.raw:
-                print("\n--- Nix docs ---")
+        if docs and "No matching" not in docs:
+            print("\n--- Nix docs ---")
             print(docs)
-        elif not results and not notes:
-            ollama = self.knowledge.ollama_fallback(search_term)
-            if ollama:
-                print("\n--- Ollama ---")
-                print(ollama)
-            else:
-                print(f"No knowledge for '{search_term}'.")
-                print(f"Try: nix search nixpkgs {search_term}")
+            return
+        web = self.knowledge.web_search(search_term)
+        if web:
+            print("\n--- web ---")
+            print(web)
+        model_out = self.knowledge.ollama_fallback(search_term)
+        if model_out:
+            print("\n--- local model ---")
+            print(model_out)
+        elif not results and not web:
+            print(f"No knowledge for '{search_term}'.")
 
-    def handle_control_query(self, query: str, subject: str = None,
-                             explain: bool = False, dry_run: bool = False,
-                             execute: bool = False, yes: bool = False):
+    def handle_control_query(self, query, subject=None, explain=False,
+                             dry_run=False, execute=False, yes=False):
         if explain:
             print(self.knowledge.explain_command(query.split()[0] if query.split() else ""))
             return
-        if not self.quiet and not self.raw:
-            print("\n⚙️  Control")
-            print("-" * 40)
         self._record(query, "control")
-        if dry_run:
-            mode = ExecutionMode.DRY_RUN
-        elif execute:
-            mode = ExecutionMode.EXECUTE
-        else:
-            mode = ExecutionMode.PREVIEW
+        mode = ExecutionMode.EXECUTE if execute else ExecutionMode.PREVIEW
         if mode == ExecutionMode.EXECUTE and not yes:
-            print(f"About to run: {query}")
-            ans = input("Run this? [y/N] ").strip().lower()
+            ans = input(f"Run {query}? [y/N] ").strip().lower()
             if ans not in ("y", "yes"):
                 print("Cancelled.")
                 return
         result = self.executor.execute_safe(query, mode=mode)
-        if result.success:
-            print(result.stdout)
-            if mode == ExecutionMode.PREVIEW and not self.raw:
-                print("\nPreview never changes the system.")
-        else:
-            print(result.stderr or "Failed")
+        print(result.stdout if result.success else result.stderr)
 
-    def _is_bare_package(self, query: str) -> bool:
+    def _is_bare_package(self, query):
         parts = query.split()
         if len(parts) != 1:
             return False
         word = parts[0].lower()
-        if word in QueryRouter.CONTROL_KEYWORDS or word in QueryRouter.HELP_KEYWORDS:
-            return False
-        if word.startswith("-") or "." in word:
-            return False
-        return True
+        return word not in QueryRouter.CONTROL_KEYWORDS and not word.startswith("-")
 
-    def handle_query(self, query: str, args: argparse.Namespace):
+    def handle_query(self, query, args):
         if query.lower() in ("help", "--help", "-h"):
             self.show_help()
             return
@@ -271,30 +181,19 @@ stdenv.mkDerivation rec {{
         if query.lower().startswith("code "):
             self.handle_code(query[5:], getattr(args, "out", None))
             return
-        if args.explain:
-            query_type = QueryType.EXPLAIN
-            subject = None
-        else:
-            query_type, subject = self.router.classify(query)
-        if self._is_bare_package(query) and query_type != QueryType.EXPLAIN:
+        query_type, subject = self.router.classify(query)
+        if self._is_bare_package(query):
             query = f"install {query}"
             query_type = QueryType.CONTROL
-        if not self.quiet and not self.raw:
-            print(f"\nAINIX · {query_type.value}")
         if query_type == QueryType.HELP:
             self.handle_help_query(query, subject)
-        elif query_type == QueryType.EXPLAIN:
-            self.handle_control_query(query, subject, explain=True)
         elif query_type == QueryType.CONTROL:
-            self.handle_control_query(
-                query, subject, dry_run=args.dry_run,
-                execute=args.execute, yes=getattr(args, "yes", False)
-            )
+            self.handle_control_query(query, subject, execute=args.execute, yes=getattr(args, "yes", False))
         else:
             self.handle_help_query(query, subject)
 
     def interactive(self):
-        print(f"AINIX {VERSION} — type 'help' or empty line to exit")
+        print(f"AINIX {VERSION}")
         while True:
             try:
                 line = input("ainix> ").strip()
@@ -306,50 +205,38 @@ stdenv.mkDerivation rec {{
             if line.lower() == "help":
                 self.show_help()
                 continue
-            if line.lower() == "uninstall":
-                self.uninstall()
-                continue
-            if line.lower() == "cache clear":
-                self.cache_clear()
-                continue
             class A: pass
             a = A()
-            a.explain = False
-            a.dry_run = False
             a.execute = False
             a.yes = False
             a.out = None
             self.handle_query(line, a)
-            print()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AINIX: local NixOS assistant")
-    parser.add_argument("query", nargs="*", help="Query or command")
-    parser.add_argument("--explain", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    parser = argparse.ArgumentParser(description="AINIX")
+    parser.add_argument("query", nargs="*")
     parser.add_argument("--execute", "-x", action="store_true")
     parser.add_argument("--yes", "-y", action="store_true")
     parser.add_argument("--raw", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--list", action="store_true")
-    parser.add_argument("--examples", action="store_true")
     parser.add_argument("--history", action="store_true")
     parser.add_argument("--note", metavar="TEXT")
     parser.add_argument("--code", metavar="REQUEST")
-    parser.add_argument("--out", metavar="FILE", help="Write code to file")
+    parser.add_argument("--out", metavar="FILE")
     parser.add_argument("--cache-clear", action="store_true")
     parser.add_argument("--uninstall", action="store_true")
+    parser.add_argument("--model", metavar="NAME", help="Ollama model (optional)")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
-
     args = parser.parse_args()
 
     if args.version:
         print(VERSION)
         return
 
-    ainix = AINIX(config_path=args.config, quiet=args.quiet, raw=args.raw)
+    ainix = AINIX(config_path=args.config, quiet=args.quiet, raw=args.raw, model=args.model)
 
     if args.uninstall:
         ainix.uninstall()
@@ -372,7 +259,6 @@ def main():
     if not args.query:
         ainix.interactive()
         return
-
     ainix.handle_query(" ".join(args.query), args)
 
 
