@@ -5,9 +5,11 @@ AINIX: AI-Native NixOS Integration
 
 import sys
 import argparse
+import json
 from pathlib import Path
+from datetime import datetime
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -23,6 +25,25 @@ class AINIX:
         self.knowledge = HelpKnowledgeBase()
         self.quiet = quiet
         self.raw = raw
+        self.history_file = Path.home() / ".local" / "share" / "ainix" / "history.log"
+        self.history_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def _record(self, query: str, kind: str):
+        entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
+        with open(self.history_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
+    def show_history(self, n: int = 20):
+        if not self.history_file.exists():
+            print("No history yet.")
+            return
+        lines = self.history_file.read_text().strip().splitlines()
+        for line in lines[-n:]:
+            try:
+                e = json.loads(line)
+                print(f"{e.get('time','')}  [{e.get('kind','')}]  {e.get('query','')}")
+            except json.JSONDecodeError:
+                continue
 
     def handle_help_query(self, query: str, subject: str = None):
         if not self.quiet and not self.raw:
@@ -30,29 +51,35 @@ class AINIX:
             print("-" * 40)
 
         search_term = subject or query
-        results = self.knowledge.search(search_term)
+        self._record(search_term, "help")
 
+        results = self.knowledge.search(search_term)
         if results and not self.raw:
             top = results[0]
-            print(f"\n{top.topic}\n")
+            print(f"\n[local] {top.topic}\n")
             print(top.content.strip())
             if top.examples:
                 print("\nExamples:")
                 for ex in top.examples:
                     print(f"  {ex}")
             if len(results) > 1:
-                others = ", ".join(e.topic for e in results[1:])
-                print(f"\nAlso related: {others}")
+                print(f"\nAlso related: {', '.join(e.topic for e in results[1:])}")
 
-        # Always consult Nix docs
         docs = self.knowledge.lookup_docs(search_term)
-        if docs and "No matching" not in docs and "not on PATH" not in docs:
+        has_docs = docs and "No matching" not in docs and "not on PATH" not in docs
+        if has_docs:
             if not self.raw:
                 print("\n--- Nix docs ---")
             print(docs)
         elif not results:
-            print(f"No local knowledge for '{search_term}'.")
-            print(docs or f"Try: nix search nixpkgs {search_term}")
+            # Optional Ollama when local and docs both miss
+            ollama = self.knowledge.ollama_fallback(search_term)
+            if ollama:
+                print("\n--- Ollama (local model) ---")
+                print(ollama)
+            else:
+                print(f"No local knowledge or Nix docs for '{search_term}'.")
+                print(docs or f"Try: nix search nixpkgs {search_term}")
 
     def handle_control_query(self, query: str, subject: str = None,
                              explain: bool = False, dry_run: bool = False,
@@ -64,6 +91,8 @@ class AINIX:
         if not self.quiet and not self.raw:
             print("\n⚙️  Control")
             print("-" * 40)
+
+        self._record(query, "control")
 
         if dry_run:
             mode = ExecutionMode.DRY_RUN
@@ -85,6 +114,7 @@ class AINIX:
             print(result.stdout)
             if mode == ExecutionMode.PREVIEW and not self.raw:
                 print("\nTo execute: ainix --execute --yes <command>")
+                print("Preview never changes the system.")
         else:
             print(result.stderr or "Failed")
 
@@ -128,6 +158,7 @@ class AINIX:
     def interactive(self):
         print(f"AINIX {VERSION} — empty line or 'quit' to exit")
         print("Preview never changes the system.\n")
+        last = None
         while True:
             try:
                 line = input("ainix> ").strip()
@@ -142,9 +173,15 @@ class AINIX:
             if line.lower() == "list":
                 print("\n".join(self.knowledge.list_topics()))
                 continue
+            if line.lower() == "history":
+                self.show_history()
+                continue
+            if line.lower() in ("preview that", "explain that") and last:
+                line = last if line.startswith("explain") else f"install {last.split()[-1]}"
+            last = line
             class A: pass
             a = A()
-            a.explain = False
+            a.explain = line.lower().startswith("explain")
             a.dry_run = False
             a.execute = False
             a.yes = False
@@ -158,8 +195,7 @@ Examples:
   ainix install firefox
   ainix firefox
   ainix "services.openssh.enable"
-  ainix --explain nixos-rebuild
-  ainix --list
+  ainix --history
   ainix            (interactive)
 """.strip())
 
@@ -170,11 +206,12 @@ def main():
     parser.add_argument("--explain", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--execute", "-x", action="store_true")
-    parser.add_argument("--yes", "-y", action="store_true", help="Skip confirm on execute")
-    parser.add_argument("--raw", action="store_true", help="Answer only")
+    parser.add_argument("--yes", "-y", action="store_true")
+    parser.add_argument("--raw", action="store_true")
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--list", action="store_true", help="List knowledge topics")
+    parser.add_argument("--list", action="store_true")
     parser.add_argument("--examples", action="store_true")
+    parser.add_argument("--history", action="store_true")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
 
@@ -189,17 +226,17 @@ def main():
     if args.examples:
         ainix._examples()
         return
-
     if args.list:
         print("\n".join(ainix.knowledge.list_topics()))
         return
-
+    if args.history:
+        ainix.show_history()
+        return
     if not args.query:
         ainix.interactive()
         return
 
-    query = " ".join(args.query)
-    ainix.handle_query(query, args)
+    ainix.handle_query(" ".join(args.query), args)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-AINIX Help Layer: local knowledge plus real Nix docs.
+AINIX Help Layer: local knowledge, cached Nix docs, optional Ollama.
 """
 
 import subprocess
 import shutil
+import json
+import hashlib
+from pathlib import Path
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
@@ -19,6 +22,8 @@ class KnowledgeEntry:
 class HelpKnowledgeBase:
     def __init__(self):
         self.knowledge = {}
+        self.cache_dir = Path.home() / ".local" / "share" / "ainix" / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._initialize_core_knowledge()
 
     def _initialize_core_knowledge(self):
@@ -41,9 +46,8 @@ Preview in AINIX never changes the system.
             """,
             tags=["packages", "install", "package", "nix", "installation"],
             related_topics=["nixos-rebuild"],
-            examples=["nix profile add nixpkgs#firefox", "nix shell nixpkgs#git"]
+            examples=["nix profile add nixpkgs#firefox"]
         )
-
         self.add_entry(
             topic="nixos-rebuild",
             content="""
@@ -59,9 +63,8 @@ Activate configuration changes:
             """,
             tags=["nixos", "rebuild", "system", "configuration"],
             related_topics=["nix-package-management"],
-            examples=["nixos-rebuild switch", "nixos-rebuild test"]
+            examples=["nixos-rebuild switch"]
         )
-
         self.add_entry(
             topic="generations-rollback",
             content="""
@@ -75,7 +78,6 @@ or pick a generation from the boot menu.
             related_topics=["nixos-rebuild"],
             examples=["nixos-rebuild switch --rollback"]
         )
-
         self.add_entry(
             topic="ainix-usage",
             content="""
@@ -85,7 +87,7 @@ Help:    ainix "How do I install a package?"
 Preview: ainix install firefox
 Execute: ainix install firefox --execute
 
-Preview never changes the system. Execute is logged.
+Preview never changes the system.
             """,
             tags=["ainix", "usage"],
             related_topics=[],
@@ -106,12 +108,8 @@ Preview never changes the system. Execute is logged.
             for tag in entry.tags:
                 if tag in q:
                     score += 10
-                elif q in tag:
-                    score += 5
             if entry.topic.replace("-", " ") in q or q in entry.topic:
                 score += 8
-            if q in entry.content.lower():
-                score += 2
             if entry.topic == "nix-package-management" and any(
                 w in q for w in ("install", "package", "packages")
             ):
@@ -135,6 +133,16 @@ Preview never changes the system. Execute is logged.
                     return entry.content
         return "No explanation available."
 
+    def _cache_key(self, query: str) -> Path:
+        h = hashlib.sha256(query.encode()).hexdigest()[:16]
+        return self.cache_dir / f"{h}.txt"
+
+    def _summarize(self, text: str, max_lines: int = 25) -> str:
+        lines = text.strip().splitlines()
+        if len(lines) <= max_lines:
+            return text.strip()
+        return "\n".join(lines[:max_lines]) + f"\n... ({len(lines) - max_lines} more lines)"
+
     def _run(self, cmd: List[str], timeout: int = 15) -> Optional[str]:
         if not shutil.which(cmd[0]):
             return None
@@ -147,18 +155,18 @@ Preview never changes the system. Execute is logged.
         return None
 
     def lookup_docs(self, query: str) -> str:
-        """Always consult real Nix docs. Returns a combined text block."""
+        cache_file = self._cache_key(query)
+        if cache_file.exists():
+            return cache_file.read_text() + "\n(cached)"
+
         sections = []
         q = query.strip()
 
-        # Option path (services.foo.enable, boot.loader..., etc.)
         if "." in q and not q.startswith("http"):
             out = self._run(["nixos-option", q], timeout=10)
             if out:
-                sections.append(f"nixos-option {q}\n\n{out[:2000]}")
+                sections.append(f"[nixos-option] {q}\n\n{self._summarize(out)}")
 
-        # Package search
-        # Strip common question words for a cleaner search term
         search_term = q
         for w in ("how", "do", "i", "install", "a", "the", "package", "packages", "what", "is"):
             search_term = search_term.replace(w, " ")
@@ -169,14 +177,13 @@ Preview never changes the system. Execute is logged.
                 timeout=25
             )
             if out:
-                sections.append(f"nix search nixpkgs {search_term}\n\n{out[:2000]}")
+                sections.append(f"[nix search] {search_term}\n\n{self._summarize(out)}")
 
-        # man page for the first word if it looks like a command
         first = q.split()[0] if q.split() else ""
         if first and shutil.which("man"):
             out = self._run(["man", "-P", "cat", first], timeout=5)
             if out:
-                sections.append(f"man {first}\n\n{out[:1200]}")
+                sections.append(f"[man] {first}\n\n{self._summarize(out, 15)}")
 
         if not sections:
             missing = []
@@ -188,4 +195,25 @@ Preview never changes the system. Execute is logged.
                 return "Nix docs tools not on PATH: " + ", ".join(missing)
             return "No matching Nix docs found."
 
-        return "\n\n---\n\n".join(sections)
+        result = "\n\n---\n\n".join(sections)
+        cache_file.write_text(result)
+        return result
+
+    def ollama_fallback(self, query: str) -> Optional[str]:
+        """Optional local model. Returns None if Ollama is unavailable."""
+        if not shutil.which("ollama"):
+            return None
+        prompt = (
+            "You are a NixOS assistant. Answer briefly using NixOS conventions. "
+            "Do not invent options. If unsure, say so.\n\nQuestion: " + query
+        )
+        try:
+            r = subprocess.run(
+                ["ollama", "run", "llama3", prompt],
+                capture_output=True, text=True, timeout=60
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (subprocess.TimeoutExpired, Exception):
+            return None
+        return None
