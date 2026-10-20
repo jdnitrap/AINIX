@@ -2,7 +2,7 @@
 
 Local NixOS assistant. Preview by default.
 
-## Install without nix profile
+## Install (no Nix required)
 
 ```bash
 git clone https://github.com/jdnitrap/AINIX.git
@@ -10,25 +10,20 @@ cd AINIX
 ./install.sh
 ```
 
-Then:
+That puts `ainix` in `~/.local/bin`. No `nix profile`, no `nix run`.
+
+Make sure `~/.local/bin` is on your PATH, then:
 
 ```bash
 ainix help
 ainix --version
 ```
 
-Remove by deleting `~/.local/bin/ainix` and `~/.local/share/ainix`.
-
-## Or run once (no install)
+## Remove
 
 ```bash
-nix run github:jdnitrap/AINIX --no-write-lock-file -- help
-```
-
-## Or with nix profile (optional)
-
-```bash
-nix profile add github:jdnitrap/AINIX --no-write-lock-file
+rm ~/.local/bin/ainix
+rm -rf ~/.local/share/ainix
 ```
 
 ## Usage
@@ -39,4 +34,12 @@ ainix "How do I install a package?"
 ainix install firefox
 ainix code "enable openssh"
 man ainix
+```
+
+## Optional: Nix install
+
+Only if you prefer Nix:
+
+```bash
+nix profile add github:jdnitrap/AINIX --no-write-lock-file
 ```
