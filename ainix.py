@@ -6,11 +6,10 @@ AINIX: AI-Native NixOS Integration
 import sys
 import argparse
 import json
-import os
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -49,7 +48,6 @@ class AINIX:
                 continue
 
     def detect_style(self) -> str:
-        """flakes or channels."""
         if Path("/etc/nixos/flake.nix").exists() or Path("flake.nix").exists():
             return "flakes"
         return "channels"
@@ -63,11 +61,7 @@ class AINIX:
         if not self.notes_file.exists():
             return []
         q = query.lower()
-        hits = []
-        for line in self.notes_file.read_text().splitlines():
-            if q in line.lower():
-                hits.append(line)
-        return hits
+        return [ln for ln in self.notes_file.read_text().splitlines() if q in ln.lower()]
 
     def explain_error(self, text: str) -> str:
         t = text.lower()
@@ -78,7 +72,7 @@ class AINIX:
             tips.append("Missing attribute: the package or option name is wrong, or it was renamed.")
         if "infinite recursion" in t:
             tips.append("Infinite recursion: an option or overlay refers to itself. Check recent changes.")
-        if "hash mismatch" in t or "hash" in t and "expected" in t:
+        if "hash mismatch" in t:
             tips.append("Hash mismatch: the source changed. Update the hash or clear the cache.")
         if "permission denied" in t:
             tips.append("Permission denied: you may need sudo, or the path is not writable.")
@@ -89,6 +83,116 @@ class AINIX:
         tips.append("You can roll back with: sudo nixos-rebuild switch --rollback")
         return "\n".join(f"- {x}" for x in tips)
 
+    def generate_code(self, request: str) -> str:
+        """Generate a Nix/NixOS/flake snippet. Preview only."""
+        r = request.lower().strip()
+        style = self.detect_style()
+
+        # Custom program not in nixpkgs
+        if any(w in r for w in ("package", "derivation", "not in nixpkgs", "custom program", "write a program")):
+            name = "myprogram"
+            for w in request.split():
+                if w.isidentifier() and w.lower() not in ("package", "derivation", "a", "the", "program"):
+                    name = w
+                    break
+            return f'''# Custom derivation (not from nixpkgs)
+# Save as {name}.nix and use via pkgs.callPackage ./{name}.nix {{}}
+
+{{ lib, stdenv, fetchurl }}:
+
+stdenv.mkDerivation rec {{
+  pname = "{name}";
+  version = "0.1.0";
+
+  src = fetchurl {{
+    url = "https://example.com/{name}-${{version}}.tar.gz";
+    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  }};
+
+  # nativeBuildInputs = [ ];
+  # buildInputs = [ ];
+
+  installPhase = ''
+    mkdir -p $out/bin
+    # install your binary or script here
+  '';
+
+  meta = with lib; {{
+    description = "Custom {name}";
+    license = licenses.mit;
+    platforms = platforms.linux;
+  }};
+}}
+'''
+
+        # Flake
+        if "flake" in r:
+            return '''# flake.nix
+{
+  description = "My NixOS config";
+
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+  outputs = { self, nixpkgs }:
+  {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [ ./configuration.nix ];
+    };
+  };
+}
+'''
+
+        # Enable a service
+        if "enable" in r or "service" in r:
+            svc = "openssh"
+            for w in request.split():
+                if "." in w:
+                    return f"# Add to configuration.nix\nservices.{w} = true;\n"
+            return f'''# Add to configuration.nix
+services.{svc}.enable = true;
+'''
+
+        # Add package to system
+        if "install" in r or "add package" in r or "systempackages" in r:
+            pkg = "firefox"
+            parts = request.split()
+            if len(parts) > 1:
+                pkg = parts[-1]
+            return f'''# Add to configuration.nix
+environment.systemPackages = with pkgs; [
+  {pkg}
+];
+
+# Then:
+# sudo nixos-rebuild switch
+'''
+
+        # Fallback: ask Ollama if available, else a generic module stub
+        ollama = self.knowledge.ollama_fallback(
+            "Write a short NixOS configuration.nix snippet for: " + request +
+            ". Output only Nix code. Do not invent options."
+        )
+        if ollama:
+            return "# From Ollama (review before use)\n" + ollama
+
+        return f'''# Generic NixOS snippet for: {request}
+# Review and edit before use.
+
+{{ config, pkgs, ... }}:
+{{
+  # environment.systemPackages = with pkgs; [ ];
+  # services.<name>.enable = true;
+}}
+'''
+
+    def handle_code(self, request: str):
+        self._record(request, "code")
+        print("\n--- generated (preview only, not written) ---")
+        print(self.generate_code(request))
+        print("--- end ---")
+        print("This does not change any files.")
+
     def handle_help_query(self, query: str, subject: str = None):
         if not self.quiet and not self.raw:
             print("\n📚 Help")
@@ -96,7 +200,6 @@ class AINIX:
 
         search_term = subject or query
         self._record(search_term, "help")
-
         style = self.detect_style()
         if not self.raw:
             print(f"[system] {style}")
@@ -107,7 +210,6 @@ class AINIX:
             for n in notes[:5]:
                 print(f"  {n}")
 
-        # Error-like paste
         if any(w in search_term.lower() for w in ("error", "failed", "collision", "recursion")):
             print("\n[error hint]")
             print(self.explain_error(search_term))
@@ -117,12 +219,6 @@ class AINIX:
             top = results[0]
             print(f"\n[local] {top.topic}\n")
             print(top.content.strip())
-            if style == "flakes" and "nixos-rebuild" in top.topic:
-                print("\nFlakes: use sudo nixos-rebuild switch --flake .#hostname")
-            if top.examples:
-                print("\nExamples:")
-                for ex in top.examples:
-                    print(f"  {ex}")
 
         docs = self.knowledge.lookup_docs(search_term)
         has_docs = docs and "No matching" not in docs and "not on PATH" not in docs
@@ -150,7 +246,6 @@ class AINIX:
             print("-" * 40)
 
         self._record(query, "control")
-
         style = self.detect_style()
         if not self.raw:
             print(f"[system] {style}")
@@ -170,14 +265,10 @@ class AINIX:
                 return
 
         result = self.executor.execute_safe(query, mode=mode)
-
         if result.success:
             print(result.stdout)
             if mode == ExecutionMode.PREVIEW and not self.raw:
-                if style == "flakes":
-                    print("\nFlakes rebuild: sudo nixos-rebuild switch --flake .#hostname")
-                print("\nTo execute: ainix --execute --yes <command>")
-                print("Preview never changes the system.")
+                print("\nPreview never changes the system.")
         else:
             print(result.stderr or "Failed")
 
@@ -193,6 +284,10 @@ class AINIX:
         return True
 
     def handle_query(self, query: str, args: argparse.Namespace):
+        if query.lower().startswith("code "):
+            self.handle_code(query[5:])
+            return
+
         if args.explain:
             query_type = QueryType.EXPLAIN
             subject = None
@@ -221,7 +316,6 @@ class AINIX:
     def interactive(self):
         print(f"AINIX {VERSION} — empty line or 'quit' to exit")
         print("Preview never changes the system.\n")
-        last = None
         while True:
             try:
                 line = input("ainix> ").strip()
@@ -242,7 +336,6 @@ class AINIX:
             if line.lower().startswith("note "):
                 self.add_note(line[5:])
                 continue
-            last = line
             class A: pass
             a = A()
             a.explain = False
@@ -257,10 +350,10 @@ class AINIX:
 Examples:
   ainix "How do I install a package?"
   ainix install firefox
-  ainix firefox
-  ainix note "remember this"
+  ainix code "enable openssh"
+  ainix code "flake for myhost"
+  ainix code "package mytool not in nixpkgs"
   ainix --history
-  ainix            (interactive)
 """.strip())
 
 
@@ -276,7 +369,8 @@ def main():
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--examples", action="store_true")
     parser.add_argument("--history", action="store_true")
-    parser.add_argument("--note", metavar="TEXT", help="Save a note")
+    parser.add_argument("--note", metavar="TEXT")
+    parser.add_argument("--code", metavar="REQUEST", help="Generate Nix/NixOS/flake snippet")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
 
@@ -290,6 +384,9 @@ def main():
 
     if args.note:
         ainix.add_note(args.note)
+        return
+    if args.code:
+        ainix.handle_code(args.code)
         return
     if args.examples:
         ainix._examples()
