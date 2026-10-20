@@ -1,91 +1,30 @@
-# AINIX Architecture
+# Architecture
 
-## Overview
+## Layers
 
-AINIX is a unified system combining Help (advisory) and Control (execution) layers to provide intelligent assistance for NixOS.
+- **Router** (`core/router.py`): classifies help vs control.
+- **Help** (`help/knowledge_base.py`): local topics, Nix docs, web search, optional Ollama.
+- **Control** (`control/executor.py`): preview-first executor with basic safety checks.
+- **CLI** (`ainix.py`): flags, config, history, notes, uninstall.
 
-```
-┌────────────────────────────────────────┐
-│         User Interface (CLI)              │
-│         ainix.py main script              │
-└───────┬─────────────────┬───────────┘
-         │                        │
-         ▼                        ▼
-    ┌───────────┐        ┌────────────┐
-    │   Router   │        │ Knowledge   │
-    │ (Classify) │        │    Base     │
-    └───────────┘        └────────────┘
-         │                        │
-    Help or Control          Topic Search
-         │                        │
-         ▼                        ▼
-    ┌───────────┐        ┌────────────┐
-    │ Executor   │        │ Help Layer  │
-    │ (Execute)  │        │ (Advise)    │
-    └───────────┘        └────────────┘
-         │
-    ┌────┤
-    ▼
-  Local Exec
-  (with tracking)
-```
+## Help order
 
-## Core Components
+Docs-first (default):
+1. Local knowledge
+2. Nix docs
+3. Web if online
+4. Local model if available and earlier steps miss
 
-### 1. Query Router (`core/router.py`)
+Model-first:
+1. Local model
+2. Fall back to docs/web if no model
 
-Classifies user queries as Help, Control, or Explain and routes them to the right handler.
+## Model
 
-### 2. Executor (`control/executor.py`)
+Optional. No GPU assumptions. Ollama is the backend if present.
+Config: `~/.config/ainix/config.json` with `model` and `model_first`.
 
-Safely executes commands with:
-- Dangerous operation detection
-- Preview / dry-run / safe / execute modes
-- Timeout protection
-- Execution tracking and optional rollback
+## Safety
 
-### 3. Help Knowledge Base (`help/knowledge_base.py`)
-
-Stores and searches advisory knowledge about NixOS and AINIX.
-
-### 4. Main Interface (`ainix.py`)
-
-Unified CLI that ties the router, knowledge base, and executor together.
-
-## Data Flow
-
-**Help query**
-```
-User: "How do I install a package?"
-  → Router classifies as HELP
-  → Knowledge Base search
-  → Display explanation + examples
-```
-
-**Control query**
-```
-User: "install firefox"
-  → Router classifies as CONTROL
-  → Executor validates
-  → Preview by default
-  → Only runs on explicit --execute
-```
-
-## Safety Model
-
-- Preview / dry-run by default
-- Dangerous commands require explicit approval
-- Command substitution and chaining are flagged
-- Timeouts and execution history
-- Optional rollback tracking
-
-## Configuration
-
-Defaults live in the executor; user config can override via `~/.config/ainix.json` or the system module.
-
-## Future Enhancements
-
-- Better query classification (optionally with an LLM)
-- GUI / web interface
-- Plugin system
-- Stronger local learning
+Preview never changes the system. Execute asks unless `--yes`.
+Dangerous patterns are blocked.

@@ -1,94 +1,60 @@
-.TH AINIX 1 "October 2026" "AINIX 0.4" "User Commands"
+.TH AINIX 1 "October 2026" "AINIX 0.5" "User Commands"
 .SH NAME
-ainix \- local NixOS assistant (help, preview, code)
+ainix \- local NixOS assistant
 .SH SYNOPSIS
 .B ainix
 [\,OPTIONS\/] [\,QUERY\/]
 .SH DESCRIPTION
-AINIX is a local assistant for NixOS. It answers questions from a small
-knowledge base and real Nix tools, shows previews of commands, and can
-generate Nix, NixOS, and flake snippets.
+AINIX is a local assistant for NixOS. It answers from a small knowledge
+base, real Nix tools, optional web search, and an optional local model.
 .PP
-Preview is the default. Nothing is executed or written unless you
-explicitly pass \fB--execute\fR.
+Default help order is docs-first. Model-first is optional.
+Preview is the default for control. Nothing runs unless you pass
+\fB--execute\fR.
 .SH OPTIONS
 .TP
-.B \-h, \-\-help
-Show help and exit.
+.B help
+Show usage.
 .TP
 .B \-\-version
-Print version and exit.
-.TP
-.B \-\-examples
-Print common usage examples.
-.TP
-.B \-\-list
-List local knowledge topics.
+Print version.
 .TP
 .B \-\-history
-Show recent queries.
+Recent queries.
 .TP
 .B \-\-note TEXT
-Save a note that Help can search later.
+Save a note.
 .TP
-.B \-\-code REQUEST
-Generate a Nix, NixOS, or flake snippet. Does not write files.
+.B \-\-cache-clear
+Clear doc cache.
 .TP
-.B \-\-explain
-Explain a command.
+.B uninstall
+Remove the curl-installed files.
+.TP
+.B \-\-model NAME
+Ollama model to use (optional).
+.TP
+.B \-\-model-first
+Ask the local model first.
+.TP
+.B \-\-docs-first
+Docs and web first (default).
 .TP
 .B \-\-execute, \-x
-Actually run a control command. Asks for confirmation unless \fB--yes\fR.
+Run a control command (asks unless \fB--yes\fR).
 .TP
 .B \-\-yes, \-y
-Skip the confirmation prompt on execute.
-.TP
-.B \-\-dry-run
-Simulate without running.
-.TP
-.B \-\-raw
-Print the answer only.
-.TP
-.B \-\-quiet
-Less decoration.
-.SH USAGE
-.TP
-.B ainix "How do I install a package?"
-Help query. Uses local knowledge and Nix docs.
-.TP
-.B ainix install firefox
-.TQ
-.B ainix firefox
-Control preview. Shows profile and declarative install lines.
-.TP
-.B ainix code "enable openssh"
-Generate a configuration snippet.
-.TP
-.B ainix code "flake for myhost"
-Generate a flake.nix.
-.TP
-.B ainix code "package mytool not in nixpkgs"
-Generate a custom derivation.
-.TP
-.B ainix
-Start interactive mode.
+Skip confirm on execute.
 .SH FILES
 .TP
-.I ~/.local/share/ainix/history.log
-Query history.
+.I ~/.config/ainix/config.json
+Optional: {"model": "gemma2:9b", "model_first": true}
 .TP
-.I ~/.local/share/ainix/notes.txt
-Saved notes.
-.TP
-.I ~/.local/share/ainix/cache/
-Cached Nix doc lookups.
-.TP
-.I ~/.local/share/ainix/commands.log
-Log of executed commands.
+.I ~/.local/share/ainix/
+History, notes, cache.
 .SH NOTES
-AINIX does not edit your configuration files. Generated code is printed
-for you to copy. Dangerous commands are blocked unless explicitly forced.
+Model is optional and hardware-agnostic. No NVIDIA/AMD assumptions.
+AINIX does not edit your config files.
 .SH SEE ALSO
 .BR nix (1),
-.BR nixos-rebuild (8),
-.BR nixos-option (8)
+.BR nixos-rebuild (8)
