@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AINIX: AI-Native NixOS Integration
+AINIX test branch: local model is the main answer path.
 """
 
 import sys
@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.5.2"
+VERSION = "0.6.0-test"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -39,8 +39,9 @@ class AINIX:
         self.executor = SafeExecutor(config_path)
         cfg = load_config(config_path)
         chosen = model or cfg.get("model")
+        # Test branch: model-first by default
         if model_first is None:
-            self.model_first = bool(cfg.get("model_first", False))
+            self.model_first = bool(cfg.get("model_first", True))
         else:
             self.model_first = model_first
         self.knowledge = HelpKnowledgeBase(model=chosen)
@@ -52,74 +53,39 @@ class AINIX:
         self.notes_file = self.data_dir / "notes.txt"
         self.cache_dir = self.data_dir / "cache"
 
-    def show_start(self):
-        style = self.detect_style()
-        rebuild = "sudo nixos-rebuild switch --flake .#hostname" if style == "flakes" else "sudo nixos-rebuild switch"
-        print(f"""AINIX start — first steps on NixOS
-
-Your system looks like: {style}
-
-1. Install a package (permanent)
-   Add to configuration.nix:
-     environment.systemPackages = with pkgs; [ firefox ];
-   Then:
-     {rebuild}
-
-   Temporary (this user only):
-     nix profile add nixpkgs#firefox
-
-2. Rebuild after any config change
-   {rebuild}
-
-3. If something breaks, roll back
-   sudo nixos-rebuild switch --rollback
-   Or pick an older generation at boot.
-
-4. Ask AINIX next
-   ainix "How do I enable ssh?"
-   ainix install vim
-   ainix help
-
-Preview never changes the system. Nothing runs unless you pass --execute.
-""")
-
     def show_help(self):
-        model = self.knowledge.pick_model() or "none"
-        mode = "model-first" if self.model_first else "docs-first"
-        print(f"""AINIX {VERSION}
-Mode:  {mode}
+        model = self.knowledge.pick_model() or "none (install ollama + a model)"
+        print(f"""AINIX {VERSION} (test)
+Local model is the default answer path.
 Model: {model}
 
-New here?  ainix start
+  ainix "How do I enable ssh?"
+  ainix --model gemma2:9b "question"
+  ainix --docs-first "question"   # fall back to docs/web
 
-Or:
-  ainix --model-first "question"
-  ainix --docs-first "question"
-
-Default is docs-first. Model is optional.
+Control stays preview-first. The model does not change the system.
 """)
+
+    def show_start(self):
+        print("AINIX test: ask in plain language. A local model answers.\n")
+        print("Example: ainix \"How do I install a package?\"")
 
     def uninstall(self):
         paths = [
             Path.home() / ".local" / "bin" / "ainix",
             Path.home() / ".local" / "share" / "ainix",
-            Path.home() / ".local" / "share" / "man" / "man1" / "ainix.1",
         ]
         for p in paths:
             if p.is_file():
                 p.unlink()
-                print(f"removed {p}")
             elif p.is_dir():
                 shutil.rmtree(p)
-                print(f"removed {p}")
         print("Uninstalled.")
 
     def cache_clear(self):
         if self.cache_dir.exists():
             shutil.rmtree(self.cache_dir)
             print("cleared cache")
-        else:
-            print("no cache")
 
     def _record(self, query, kind):
         entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
@@ -133,59 +99,45 @@ Default is docs-first. Model is optional.
         for line in self.history_file.read_text().strip().splitlines()[-n:]:
             try:
                 e = json.loads(line)
-                print(f"{e.get('time','')}  [{e.get('kind','')}]  {e.get('query','')}")
+                print(f"{e.get('time','')}  {e.get('query','')}")
             except json.JSONDecodeError:
                 continue
-
-    def detect_style(self):
-        if Path("/etc/nixos/flake.nix").exists() or Path("flake.nix").exists():
-            return "flakes"
-        return "channels"
-
-    def add_note(self, text):
-        with open(self.notes_file, "a") as f:
-            f.write(text.strip() + "\n")
-        print(f"Noted: {text.strip()}")
 
     def handle_help_query(self, query, subject=None):
         search_term = subject or query
         self._record(search_term, "help")
-        if not self.raw:
-            mode = "model-first" if self.model_first else "docs-first"
-            print(f"[{mode}]")
 
-        def show_model():
-            out = self.knowledge.ollama_fallback(search_term)
-            if out:
-                print("\n--- local model ---")
-                print(out)
-                return True
-            return False
-
-        def show_docs_and_web():
-            results = self.knowledge.search(search_term)
-            if results and not self.raw:
-                print(results[0].content.strip())
-            docs = self.knowledge.lookup_docs(search_term)
-            if docs and "No matching" not in docs:
-                print("\n--- Nix docs ---")
-                print(docs)
-                return True
-            web = self.knowledge.web_search(search_term)
-            if web:
-                print("\n--- web ---")
-                print(web)
-                return True
-            return bool(results)
+        # Ground the model with a short docs snippet when possible
+        docs = self.knowledge.lookup_docs(search_term)
+        context = ""
+        if docs and "No matching" not in docs:
+            context = docs[:800]
 
         if self.model_first:
-            got = show_model()
-            if not got:
-                show_docs_and_web()
-        else:
-            got = show_docs_and_web()
-            if not got:
-                show_model()
+            prompt = search_term
+            if context:
+                prompt = (
+                    "Use this Nix context if relevant. Do not invent options.\n\n"
+                    + context + "\n\nQuestion: " + search_term
+                )
+            # Temporarily override by calling ollama with enriched prompt via fallback path
+            out = self.knowledge.ollama_fallback(prompt)
+            if out:
+                print("--- local model ---")
+                print(out)
+                return
+            print("No local model available. Falling back to docs.\n")
+
+        results = self.knowledge.search(search_term)
+        if results:
+            print(results[0].content.strip())
+        if docs and "No matching" not in docs:
+            print("\n--- Nix docs ---")
+            print(docs)
+        web = self.knowledge.web_search(search_term)
+        if web:
+            print("\n--- web ---")
+            print(web)
 
     def handle_control_query(self, query, subject=None, explain=False,
                              dry_run=False, execute=False, yes=False):
@@ -198,6 +150,7 @@ Default is docs-first. Model is optional.
                 return
         result = self.executor.execute_safe(query, mode=mode)
         print(result.stdout if result.success else result.stderr)
+        print("\nPreview never changes the system." if mode == ExecutionMode.PREVIEW else "")
 
     def _is_bare_package(self, query):
         parts = query.split()
@@ -228,7 +181,7 @@ Default is docs-first. Model is optional.
             self.handle_help_query(query, subject)
 
     def interactive(self):
-        print(f"AINIX {VERSION}")
+        print(f"AINIX {VERSION} — local model answers")
         while True:
             try:
                 line = input("ainix> ").strip()
@@ -237,12 +190,6 @@ Default is docs-first. Model is optional.
                 break
             if not line or line.lower() in ("quit", "exit"):
                 break
-            if line.lower() == "help":
-                self.show_help()
-                continue
-            if line.lower() == "start":
-                self.show_start()
-                continue
             class A: pass
             a = A()
             a.execute = False
@@ -251,20 +198,17 @@ Default is docs-first. Model is optional.
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AINIX")
+    parser = argparse.ArgumentParser(description="AINIX test: local model first")
     parser.add_argument("query", nargs="*")
     parser.add_argument("--execute", "-x", action="store_true")
     parser.add_argument("--yes", "-y", action="store_true")
     parser.add_argument("--raw", action="store_true")
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--list", action="store_true")
     parser.add_argument("--history", action="store_true")
-    parser.add_argument("--note", metavar="TEXT")
     parser.add_argument("--cache-clear", action="store_true")
     parser.add_argument("--uninstall", action="store_true")
-    parser.add_argument("--model", metavar="NAME", help="Ollama model (optional)")
-    parser.add_argument("--model-first", action="store_true", help="Ask model first")
-    parser.add_argument("--docs-first", action="store_true", help="Docs/web first (default)")
+    parser.add_argument("--model", metavar="NAME")
+    parser.add_argument("--docs-first", action="store_true", help="Skip model, use docs")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
     args = parser.parse_args()
@@ -273,18 +217,12 @@ def main():
         print(VERSION)
         return
 
-    model_first = None
-    if args.model_first:
-        model_first = True
-    elif args.docs_first:
-        model_first = False
-
     ainix = AINIX(
         config_path=args.config,
         quiet=args.quiet,
         raw=args.raw,
         model=args.model,
-        model_first=model_first,
+        model_first=False if args.docs_first else None,
     )
 
     if args.uninstall:
@@ -292,12 +230,6 @@ def main():
         return
     if args.cache_clear:
         ainix.cache_clear()
-        return
-    if args.note:
-        ainix.add_note(args.note)
-        return
-    if args.list:
-        print("\n".join(ainix.knowledge.list_topics()))
         return
     if args.history:
         ainix.show_history()
