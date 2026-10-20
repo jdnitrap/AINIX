@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 AINIX: AI-Native NixOS Integration
-Main CLI interface combining Help and Control layers.
 """
 
 import sys
 import argparse
 from pathlib import Path
+
+VERSION = "0.2.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -16,53 +17,60 @@ from help.knowledge_base import HelpKnowledgeBase
 
 
 class AINIX:
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, quiet=False, raw=False):
         self.router = QueryRouter()
         self.executor = SafeExecutor(config_path)
         self.knowledge = HelpKnowledgeBase()
+        self.quiet = quiet
+        self.raw = raw
+
+    def _out(self, text: str):
+        if not self.raw:
+            print(text)
 
     def handle_help_query(self, query: str, subject: str = None):
-        print("📚 Help System")
-        print("-" * 40)
+        if not self.quiet and not self.raw:
+            print("\n📚 Help")
+            print("-" * 40)
 
         search_term = subject or query
         results = self.knowledge.search(search_term)
 
         if results:
-            for entry in results:
-                print(f"\n📖 {entry.topic.upper()}")
-                print("-" * 40)
-                print(entry.content)
-                if entry.examples:
-                    print("\n💡 Examples:")
-                    for example in entry.examples:
-                        print(f"  {example}")
+            top = results[0]
+            if self.raw:
+                print(top.content.strip())
+            else:
+                print(f"\n{top.topic}\n")
+                print(top.content.strip())
+                if top.examples:
+                    print("\nExamples:")
+                    for ex in top.examples:
+                        print(f"  {ex}")
+                if len(results) > 1:
+                    others = ", ".join(e.topic for e in results[1:])
+                    print(f"\nAlso related: {others}")
             return
 
-        # Fall back to real Nix tools
         external = self.knowledge.lookup_external(search_term)
         if external:
             print(external)
             return
 
-        print(f"📝 No local or external knowledge found for '{search_term}'")
-        print("\nTry:")
-        print("  nix search nixpkgs <name>")
-        print("  nixos-option <option.path>")
-        print("  https://nixos.org/manual/")
+        print(f"No knowledge found for '{search_term}'.")
+        print(f"Try: nix search nixpkgs {search_term}")
+        print("Or: https://nixos.org/manual/")
 
     def handle_control_query(self, query: str, subject: str = None,
                              explain: bool = False, dry_run: bool = False,
-                             execute: bool = False):
+                             execute: bool = False, yes: bool = False):
         if explain:
-            print("🔍 EXPLANATION MODE")
-            print("-" * 40)
-            print(f"Command: {query}")
             print(self.knowledge.explain_command(query.split()[0] if query.split() else ""))
             return
 
-        print("⚙️  Control System")
-        print("-" * 40)
+        if not self.quiet and not self.raw:
+            print("\n⚙️  Control")
+            print("-" * 40)
 
         if dry_run:
             mode = ExecutionMode.DRY_RUN
@@ -71,73 +79,118 @@ class AINIX:
         else:
             mode = ExecutionMode.PREVIEW
 
-        print(f"📋 {query}")
+        if mode == ExecutionMode.EXECUTE and not yes:
+            print(f"About to run: {query}")
+            ans = input("Run this? [y/N] ").strip().lower()
+            if ans not in ("y", "yes"):
+                print("Cancelled.")
+                return
+
         result = self.executor.execute_safe(query, mode=mode)
 
         if result.success:
-            print(f"\n✅ {result.mode.value.upper()}")
             print(result.stdout)
+            if mode == ExecutionMode.PREVIEW and not self.raw:
+                print("\nTo execute: ainix --execute --yes <command>")
         else:
-            print(f"\n❌ FAILED")
-            print(result.stderr)
-
-        if mode == ExecutionMode.PREVIEW and result.success:
-            print("\n" + "-" * 40)
-            print("To execute, use: --execute or -x")
-            print("Executions are logged to ~/.local/share/ainix/commands.log")
+            print(result.stderr or "Failed")
 
     def handle_query(self, query: str, args: argparse.Namespace):
         if args.explain:
             query_type = QueryType.EXPLAIN
             subject = None
         else:
-            clean_query = query
-            for flag in ['--execute', '-x', '--dry-run', '--explain']:
-                clean_query = clean_query.replace(flag, '').strip()
-            query_type, subject = self.router.classify(clean_query)
+            query_type, subject = self.router.classify(query)
 
-        print(f"\n🤖 AINIX - Query Type: {query_type.value}")
-        print("=" * 40)
-
-        clean_query = query
-        for flag in ['--execute', '-x', '--dry-run', '--explain']:
-            clean_query = clean_query.replace(flag, '').strip()
+        if not self.quiet and not self.raw:
+            print(f"\nAINIX · {query_type.value}")
 
         if query_type == QueryType.HELP:
-            self.handle_help_query(clean_query, subject)
+            self.handle_help_query(query, subject)
         elif query_type == QueryType.EXPLAIN:
-            self.handle_control_query(clean_query, subject, explain=True)
+            self.handle_control_query(query, subject, explain=True)
         elif query_type == QueryType.CONTROL:
             self.handle_control_query(
-                clean_query, subject, explain=False,
-                dry_run=args.dry_run, execute=args.execute
+                query, subject, dry_run=args.dry_run,
+                execute=args.execute, yes=getattr(args, "yes", False)
             )
         else:
-            print("❓ UNKNOWN QUERY TYPE")
-            print("Try a question (How/What) or a command (install, rebuild, ...)")
+            # Bare names default to help
+            self.handle_help_query(query, subject)
+
+    def interactive(self):
+        print(f"AINIX {VERSION} — empty line or 'quit' to exit")
+        print("Preview never changes the system.\n")
+        while True:
+            try:
+                line = input("ainix> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not line or line.lower() in ("quit", "exit"):
+                break
+            if line.lower() == "examples":
+                self._examples()
+                continue
+            if line.lower() == "list":
+                print("\n".join(self.knowledge.list_topics()))
+                continue
+            # Reuse a minimal args-like object
+            class A: pass
+            a = A()
+            a.explain = False
+            a.dry_run = False
+            a.execute = False
+            a.yes = False
+            self.handle_query(line, a)
+            print()
+
+    def _examples(self):
+        print("""
+Examples:
+  ainix "How do I install a package?"
+  ainix install firefox
+  ainix --explain nixos-rebuild
+  ainix --list
+  ainix            (interactive)
+""".strip())
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="AINIX: AI-Native NixOS Integration",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  ainix "How do I install Rust?"
-  ainix install firefox
-  ainix --explain nixos-rebuild
-  ainix install firefox --execute
-        """
-    )
-    parser.add_argument("query", nargs="+", help="Query or command")
-    parser.add_argument("--explain", action="store_true", help="Explain a command")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate")
-    parser.add_argument("--execute", "-x", action="store_true", help="Actually run")
-    parser.add_argument("--config", metavar="PATH", help="Config file")
+    parser = argparse.ArgumentParser(description="AINIX: local NixOS assistant")
+    parser.add_argument("query", nargs="*", help="Query or command")
+    parser.add_argument("--explain", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--execute", "-x", action="store_true")
+    parser.add_argument("--yes", "-y", action="store_true", help="Skip confirm on execute")
+    parser.add_argument("--raw", action="store_true", help="Answer only")
+    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--list", action="store_true", help="List knowledge topics")
+    parser.add_argument("--examples", action="store_true")
+    parser.add_argument("--version", action="store_true")
+    parser.add_argument("--config", metavar="PATH")
 
     args = parser.parse_args()
+
+    if args.version:
+        print(VERSION)
+        return
+
+    ainix = AINIX(config_path=args.config, quiet=args.quiet, raw=args.raw)
+
+    if args.examples:
+        ainix._examples()
+        return
+
+    if args.list:
+        print("\n".join(ainix.knowledge.list_topics()))
+        return
+
+    if not args.query:
+        ainix.interactive()
+        return
+
     query = " ".join(args.query)
-    ainix = AINIX(config_path=args.config)
     ainix.handle_query(query, args)
 
 

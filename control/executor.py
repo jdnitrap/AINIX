@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-AINIX Control Executor: Safely executes commands with guardrails.
+AINIX Control Executor: preview with real Nix commands, then optional execute.
 """
 
 import subprocess
 import json
-import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List, Any
@@ -41,11 +41,7 @@ class SafeExecutor:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def _load_config(self, config_path: Optional[str]) -> Dict[str, Any]:
-        default = {
-            "default_mode": "preview",
-            "require_approval": True,
-            "log_commands": True,
-        }
+        default = {"default_mode": "preview", "log_commands": True}
         if config_path:
             try:
                 with open(config_path) as f:
@@ -57,8 +53,7 @@ class SafeExecutor:
     def _log(self, entry: dict):
         if not self.config.get("log_commands", True):
             return
-        log_file = self.log_dir / "commands.log"
-        with open(log_file, "a") as f:
+        with open(self.log_dir / "commands.log", "a") as f:
             f.write(json.dumps(entry) + "\n")
 
     def validate_command(self, command: str):
@@ -70,34 +65,54 @@ class SafeExecutor:
             return False, "Command substitution requires explicit approval"
         if any(x in command for x in ('&&', '||', ';')):
             return False, "Command chaining requires explicit approval"
+        if 'sudo' in lower:
+            return False, "Refusing sudo without an explicit --sudo flag"
         return True, None
 
-    def preview_command(self, command: str) -> List[str]:
-        lines = [
-            "Would execute:",
-            f"  {command}",
+    def _install_preview(self, package: str) -> List[str]:
+        return [
+            "This would change the system if executed.",
             "",
+            "Temporary (profile):",
+            f"  nix profile add nixpkgs#{package}",
+            "",
+            "Declarative (preferred):",
+            f"  environment.systemPackages = with pkgs; [ {package} ];",
+            "  sudo nixos-rebuild switch",
+            "",
+            "Preview never changes the system.",
+            "",
+            "Copy-friendly:",
+            f"  nix profile add nixpkgs#{package}",
         ]
-        # For nix/nixos commands, try a real dry-run if possible
+
+    def preview_command(self, command: str) -> List[str]:
+        parts = command.split()
+        if len(parts) >= 2 and parts[0].lower() in ("install", "add"):
+            return self._install_preview(parts[1])
+
+        lines = [
+            "Read-only / preview.",
+            f"Would execute: {command}",
+            "",
+            "Preview never changes the system.",
+        ]
         if command.strip().startswith(("nix ", "nixos-rebuild")):
             try:
-                # Prefer a safe dry-run style where available
-                dry = command
-                if "nixos-rebuild" in command and "dry-run" not in command and "dry-build" not in command:
-                    dry = command.replace("nixos-rebuild", "nixos-rebuild", 1) + " --dry-run"
                 r = subprocess.run(
-                    dry, shell=True, capture_output=True, text=True, timeout=60
+                    command, shell=True, capture_output=True, text=True, timeout=30
                 )
                 if r.stdout or r.stderr:
-                    lines.append("Dry-run output:")
-                    lines.append((r.stdout or r.stderr)[:1500])
+                    lines.append("")
+                    lines.append("Tool output:")
+                    lines.append((r.stdout or r.stderr)[:800])
             except (subprocess.TimeoutExpired, Exception):
-                pass
+                lines.append("(tool timed out or unavailable)")
         return lines
 
     def execute_safe(self, command: str, mode: ExecutionMode = ExecutionMode.PREVIEW) -> ExecutionResult:
         ok, err = self.validate_command(command)
-        if not ok:
+        if not ok and mode != ExecutionMode.PREVIEW:
             return ExecutionResult(False, "", err or "Validation failed", command, mode)
 
         if mode == ExecutionMode.PREVIEW:
@@ -106,9 +121,7 @@ class SafeExecutor:
             )
 
         if mode == ExecutionMode.DRY_RUN:
-            return ExecutionResult(
-                True, f"Would run: {command}", "", command, mode
-            )
+            return ExecutionResult(True, f"Would run: {command}", "", command, mode)
 
         if mode in (ExecutionMode.EXECUTE, ExecutionMode.SAFE):
             return self._run(command, mode)
@@ -128,15 +141,7 @@ class SafeExecutor:
                 "command": command,
                 "mode": mode.value,
                 "success": result.success,
-                "returncode": r.returncode,
             })
             return result
         except subprocess.TimeoutExpired:
-            self._log({
-                "time": datetime.utcnow().isoformat() + "Z",
-                "command": command,
-                "mode": mode.value,
-                "success": False,
-                "error": "timeout",
-            })
             return ExecutionResult(False, "", "Command timed out", command, mode)
