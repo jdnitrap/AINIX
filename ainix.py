@@ -7,7 +7,7 @@ import sys
 import argparse
 from pathlib import Path
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -24,10 +24,6 @@ class AINIX:
         self.quiet = quiet
         self.raw = raw
 
-    def _out(self, text: str):
-        if not self.raw:
-            print(text)
-
     def handle_help_query(self, query: str, subject: str = None):
         if not self.quiet and not self.raw:
             print("\n📚 Help")
@@ -36,30 +32,27 @@ class AINIX:
         search_term = subject or query
         results = self.knowledge.search(search_term)
 
-        if results:
+        if results and not self.raw:
             top = results[0]
-            if self.raw:
-                print(top.content.strip())
-            else:
-                print(f"\n{top.topic}\n")
-                print(top.content.strip())
-                if top.examples:
-                    print("\nExamples:")
-                    for ex in top.examples:
-                        print(f"  {ex}")
-                if len(results) > 1:
-                    others = ", ".join(e.topic for e in results[1:])
-                    print(f"\nAlso related: {others}")
-            return
+            print(f"\n{top.topic}\n")
+            print(top.content.strip())
+            if top.examples:
+                print("\nExamples:")
+                for ex in top.examples:
+                    print(f"  {ex}")
+            if len(results) > 1:
+                others = ", ".join(e.topic for e in results[1:])
+                print(f"\nAlso related: {others}")
 
-        external = self.knowledge.lookup_external(search_term)
-        if external:
-            print(external)
-            return
-
-        print(f"No knowledge found for '{search_term}'.")
-        print(f"Try: nix search nixpkgs {search_term}")
-        print("Or: https://nixos.org/manual/")
+        # Always consult Nix docs
+        docs = self.knowledge.lookup_docs(search_term)
+        if docs and "No matching" not in docs and "not on PATH" not in docs:
+            if not self.raw:
+                print("\n--- Nix docs ---")
+            print(docs)
+        elif not results:
+            print(f"No local knowledge for '{search_term}'.")
+            print(docs or f"Try: nix search nixpkgs {search_term}")
 
     def handle_control_query(self, query: str, subject: str = None,
                              explain: bool = False, dry_run: bool = False,
@@ -96,7 +89,6 @@ class AINIX:
             print(result.stderr or "Failed")
 
     def _is_bare_package(self, query: str) -> bool:
-        """Single word that isn't a control keyword → treat as package name."""
         parts = query.split()
         if len(parts) != 1:
             return False
@@ -114,7 +106,6 @@ class AINIX:
         else:
             query_type, subject = self.router.classify(query)
 
-        # Bare package name (firefox, git, vim, ...) → install preview
         if self._is_bare_package(query) and query_type != QueryType.EXPLAIN:
             query = f"install {query}"
             query_type = QueryType.CONTROL
@@ -166,6 +157,7 @@ Examples:
   ainix "How do I install a package?"
   ainix install firefox
   ainix firefox
+  ainix "services.openssh.enable"
   ainix --explain nixos-rebuild
   ainix --list
   ainix            (interactive)
