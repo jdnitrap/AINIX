@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
 AINIX Help Layer: Knowledge base and advisory system.
+Falls back to real Nix tools when the local base has no answer.
 """
 
-from typing import Optional, Dict, List
+import subprocess
+from typing import Optional, List
 from dataclasses import dataclass
 
 @dataclass
 class KnowledgeEntry:
-    """A piece of knowledge in the knowledge base."""
     topic: str
     content: str
     tags: List[str]
@@ -16,237 +17,111 @@ class KnowledgeEntry:
     examples: List[str]
 
 class HelpKnowledgeBase:
-    """Knowledge base for NixOS and AINIX topics."""
-
     def __init__(self):
         self.knowledge = {}
         self._initialize_core_knowledge()
 
     def _initialize_core_knowledge(self):
-        """Initialize core knowledge about NixOS and AINIX."""
-
-        # NixOS Basics
         self.add_entry(
             topic="nixos-rebuild",
             content="""
 NixOS uses nixos-rebuild to activate configuration changes.
 
 Main operations:
-- build: Build the new configuration without activating
-- switch: Build and activate the configuration
-- boot: Build but only activate on next boot
-- test: Build and activate, but not permanently (reverts on reboot)
+- build: Build without activating
+- switch: Build and activate
+- boot: Activate on next boot
+- test: Activate temporarily (reverts on reboot)
 
-Common usage:
-  sudo nixos-rebuild switch        # Apply changes
-  sudo nixos-rebuild boot          # Apply on next boot
-  sudo nixos-rebuild test          # Test changes (revert on reboot)
-  nixos-rebuild build              # Just build, don't activate
+  sudo nixos-rebuild switch
+  sudo nixos-rebuild test
+  nixos-rebuild build
             """,
             tags=["nixos", "system", "configuration"],
-            related_topics=["nix-rebuild", "system-management"],
-            examples=[
-                "nixos-rebuild switch",
-                "nixos-rebuild test",
-                "nixos-rebuild boot"
-            ]
+            related_topics=["nix-rebuild"],
+            examples=["nixos-rebuild switch", "nixos-rebuild test"]
         )
 
-        # Package Management
         self.add_entry(
             topic="nix-package-management",
             content="""
-NixOS provides multiple ways to manage packages:
+Ways to manage packages:
 
-1. System packages (in configuration.nix):
-   environment.systemPackages = [ pkgs.firefox pkgs.git ];
+1. System packages in configuration.nix
+2. nix profile install (per-user)
+3. nix shell / nix run (temporary)
 
-2. Per-user packages (imperative, temporary):
-   nix-env -i firefox
-
-3. Nix shell (temporary environment):
-   nix shell nixpkgs#firefox
-
-4. Flake packages:
-   nix run github:user/repo#package
-
-Best practice: Define packages in configuration.nix for consistency.
+Prefer declarative system or home-manager packages for permanence.
             """,
             tags=["packages", "nix", "installation"],
-            related_topics=["system-packages", "nix-shell"],
-            examples=[
-                "environment.systemPackages = with pkgs; [ firefox ];",
-                "nix-env -i firefox",
-                "nix shell nixpkgs#firefox"
-            ]
+            related_topics=["system-packages"],
+            examples=["nix profile install nixpkgs#firefox", "nix shell nixpkgs#git"]
         )
 
-        # Configuration Files
-        self.add_entry(
-            topic="nixos-configuration",
-            content="""
-Main NixOS configuration file: /etc/nixos/configuration.nix
-
-Structure:
-{ config, pkgs, ... }:
-{
-  # System packages
-  environment.systemPackages = [ ... ];
-
-  # User management
-  users.users.username = { ... };
-
-  # Services
-  services.openssh.enable = true;
-
-  # Networking
-  networking.hostname = "myhost";
-  networking.interfaces.eth0.useDHCP = true;
-
-  # Boot configuration
-  boot.loader.grub.enable = true;
-
-  # Import additional modules
-  imports = [ ./hardware-configuration.nix ];
-}
-
-After editing, apply changes with:
-  sudo nixos-rebuild switch
-            """,
-            tags=["configuration", "nixos", "system"],
-            related_topics=["nixos-rebuild", "modules"],
-            examples=[
-                "{ config, pkgs, ... }:",
-                "environment.systemPackages = with pkgs; [ ... ];",
-                "services.openssh.enable = true;"
-            ]
-        )
-
-        # AINIX Usage
         self.add_entry(
             topic="ainix-usage",
             content="""
-AINIX combines help and control into one system.
+AINIX is a local NixOS assistant.
 
-Usage patterns:
+Help:  ainix "How do I install a package?"
+Preview: ainix install firefox
+Execute: ainix install firefox --execute
 
-1. Ask for help:
-   ainix "How do I install a package?"
-   → AINIX explains different methods
-
-2. Execute a command:
-   ainix install firefox
-   → AINIX shows preview, asks for confirmation, executes safely
-
-3. Get explanation:
-   ainix --explain "What does nixos-rebuild switch do?"
-   → AINIX provides detailed explanation
-
-Safety features:
-- Preview by default (show what would happen)
-- Confirmation required for dangerous operations
-- Rollback support
-- Command history tracking
+Preview is the default. Execute is logged.
             """,
-            tags=["ainix", "usage", "help"],
-            related_topics=["help-system", "control-system"],
-            examples=[
-                "ainix install firefox",
-                "ainix 'How do I...?'",
-                "ainix --explain command"
-            ]
+            tags=["ainix", "usage"],
+            related_topics=[],
+            examples=["ainix install firefox"]
         )
 
-    def add_entry(
-        self,
-        topic: str,
-        content: str,
-        tags: List[str],
-        related_topics: List[str],
-        examples: List[str]
-    ):
-        """Add a knowledge entry to the base."""
+    def add_entry(self, topic, content, tags, related_topics, examples):
         self.knowledge[topic.lower()] = KnowledgeEntry(
-            topic=topic,
-            content=content,
-            tags=tags,
-            related_topics=related_topics,
-            examples=examples
+            topic=topic, content=content, tags=tags,
+            related_topics=related_topics, examples=examples
         )
 
     def search(self, query: str, limit: int = 3) -> List[KnowledgeEntry]:
-        """Search for knowledge entries matching the query."""
         query_lower = query.lower()
         results = []
-
         for topic, entry in self.knowledge.items():
-            # Match by topic
-            if query_lower in topic:
+            if query_lower in topic or any(query_lower in t.lower() for t in entry.tags) or query_lower in entry.content.lower():
                 results.append(entry)
-                continue
-
-            # Match by tags
-            if any(query_lower in tag.lower() for tag in entry.tags):
-                results.append(entry)
-                continue
-
-            # Match by content (first 100 chars)
-            if query_lower in entry.content.lower():
-                results.append(entry)
-
         return results[:limit]
 
     def get(self, topic: str) -> Optional[KnowledgeEntry]:
-        """Get a specific knowledge entry."""
         return self.knowledge.get(topic.lower())
 
-    def suggest_related(self, topic: str, limit: int = 3) -> List[KnowledgeEntry]:
-        """Suggest related topics."""
-        entry = self.get(topic)
-        if not entry:
-            return []
-
-        results = []
-        for related_topic in entry.related_topics:
-            related = self.get(related_topic)
-            if related and related not in results:
-                results.append(related)
-
-        return results[:limit]
-
     def explain_command(self, command: str) -> str:
-        """Provide explanation for a command."""
-        explanations = {
-            "nixos-rebuild": self.get("nixos-rebuild"),
-            "nix-env": self.get("nix-package-management"),
-            "nix": self.get("nix-package-management"),
-        }
+        for prefix in ("nixos-rebuild", "nix-env", "nix"):
+            if command.startswith(prefix):
+                entry = self.get(prefix if prefix != "nix" else "nix-package-management")
+                if entry:
+                    return entry.content
+        return "No explanation available."
 
-        for cmd_prefix, entry in explanations.items():
-            if command.startswith(cmd_prefix):
-                return entry.content if entry else "No explanation available."
+    def lookup_external(self, query: str) -> Optional[str]:
+        """Try real Nix tools for an answer."""
+        # Try nixos-option if it looks like an option path
+        if "." in query and not query.startswith("http"):
+            try:
+                r = subprocess.run(
+                    ["nixos-option", query],
+                    capture_output=True, text=True, timeout=15
+                )
+                if r.returncode == 0 and r.stdout.strip():
+                    return f"nixos-option {query}:\n\n{r.stdout[:2000]}"
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
 
-        return "No explanation available for this command."
+        # Try nix search for package-like queries
+        try:
+            r = subprocess.run(
+                ["nix", "search", "nixpkgs", query, "--no-update-lock-file"],
+                capture_output=True, text=True, timeout=30
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                return f"nix search nixpkgs {query}:\n\n{r.stdout[:2000]}"
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
 
-
-if __name__ == "__main__":
-    kb = HelpKnowledgeBase()
-
-    # Test knowledge base
-    test_queries = [
-        "nixos",
-        "packages",
-        "rebuild"
-    ]
-
-    for query in test_queries:
-        print(f"Query: {query}")
-        results = kb.search(query)
-        for entry in results:
-            print(f"  Found: {entry.topic}")
-            print(f"    Tags: {', '.join(entry.tags)}")
-        print()
-
-    # Test explanation
-    print("Explanation for 'nixos-rebuild switch':")
-    print(kb.explain_command("nixos-rebuild"))
+        return None
