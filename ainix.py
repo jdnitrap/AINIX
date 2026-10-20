@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -29,6 +29,29 @@ class AINIX:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.history_file = self.data_dir / "history.log"
         self.notes_file = self.data_dir / "notes.txt"
+
+    def show_help(self):
+        print(f"""AINIX {VERSION} — local NixOS assistant
+
+Usage:
+  ainix help                         this help
+  ainix --help                       argparse help
+  ainix "How do I install a package?"  ask a question
+  ainix install firefox              preview an install
+  ainix firefox                      same (bare name)
+  ainix code "enable openssh"        generate NixOS snippet
+  ainix code "flake for myhost"      generate flake.nix
+  ainix code "package mytool not in nixpkgs"
+  ainix --note "remember this"       save a note
+  ainix --history                    recent queries
+  ainix --list                       knowledge topics
+  ainix --examples                   short examples
+  ainix --version                    version
+  ainix                              interactive mode
+  man ainix                          man page
+
+Preview is the default. Nothing runs or is written unless you pass --execute.
+""")
 
     def _record(self, query: str, kind: str):
         entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
@@ -84,11 +107,8 @@ class AINIX:
         return "\n".join(f"- {x}" for x in tips)
 
     def generate_code(self, request: str) -> str:
-        """Generate a Nix/NixOS/flake snippet. Preview only."""
         r = request.lower().strip()
-        style = self.detect_style()
 
-        # Custom program not in nixpkgs
         if any(w in r for w in ("package", "derivation", "not in nixpkgs", "custom program", "write a program")):
             name = "myprogram"
             for w in request.split():
@@ -109,12 +129,8 @@ stdenv.mkDerivation rec {{
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
 
-  # nativeBuildInputs = [ ];
-  # buildInputs = [ ];
-
   installPhase = ''
     mkdir -p $out/bin
-    # install your binary or script here
   '';
 
   meta = with lib; {{
@@ -125,16 +141,12 @@ stdenv.mkDerivation rec {{
 }}
 '''
 
-        # Flake
         if "flake" in r:
             return '''# flake.nix
 {
   description = "My NixOS config";
-
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-
-  outputs = { self, nixpkgs }:
-  {
+  outputs = { self, nixpkgs }: {
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [ ./configuration.nix ];
@@ -143,32 +155,19 @@ stdenv.mkDerivation rec {{
 }
 '''
 
-        # Enable a service
         if "enable" in r or "service" in r:
-            svc = "openssh"
-            for w in request.split():
-                if "." in w:
-                    return f"# Add to configuration.nix\nservices.{w} = true;\n"
-            return f'''# Add to configuration.nix
-services.{svc}.enable = true;
+            return '''# Add to configuration.nix
+services.openssh.enable = true;
 '''
 
-        # Add package to system
         if "install" in r or "add package" in r or "systempackages" in r:
-            pkg = "firefox"
-            parts = request.split()
-            if len(parts) > 1:
-                pkg = parts[-1]
+            pkg = request.split()[-1] if len(request.split()) > 1 else "firefox"
             return f'''# Add to configuration.nix
 environment.systemPackages = with pkgs; [
   {pkg}
 ];
-
-# Then:
-# sudo nixos-rebuild switch
 '''
 
-        # Fallback: ask Ollama if available, else a generic module stub
         ollama = self.knowledge.ollama_fallback(
             "Write a short NixOS configuration.nix snippet for: " + request +
             ". Output only Nix code. Do not invent options."
@@ -177,8 +176,6 @@ environment.systemPackages = with pkgs; [
             return "# From Ollama (review before use)\n" + ollama
 
         return f'''# Generic NixOS snippet for: {request}
-# Review and edit before use.
-
 {{ config, pkgs, ... }}:
 {{
   # environment.systemPackages = with pkgs; [ ];
@@ -197,29 +194,24 @@ environment.systemPackages = with pkgs; [
         if not self.quiet and not self.raw:
             print("\n📚 Help")
             print("-" * 40)
-
         search_term = subject or query
         self._record(search_term, "help")
         style = self.detect_style()
         if not self.raw:
             print(f"[system] {style}")
-
         notes = self.search_notes(search_term)
         if notes and not self.raw:
             print("\n[notes]")
             for n in notes[:5]:
                 print(f"  {n}")
-
         if any(w in search_term.lower() for w in ("error", "failed", "collision", "recursion")):
             print("\n[error hint]")
             print(self.explain_error(search_term))
-
         results = self.knowledge.search(search_term)
         if results and not self.raw:
             top = results[0]
             print(f"\n[local] {top.topic}\n")
             print(top.content.strip())
-
         docs = self.knowledge.lookup_docs(search_term)
         has_docs = docs and "No matching" not in docs and "not on PATH" not in docs
         if has_docs:
@@ -240,30 +232,22 @@ environment.systemPackages = with pkgs; [
         if explain:
             print(self.knowledge.explain_command(query.split()[0] if query.split() else ""))
             return
-
         if not self.quiet and not self.raw:
             print("\n⚙️  Control")
             print("-" * 40)
-
         self._record(query, "control")
-        style = self.detect_style()
-        if not self.raw:
-            print(f"[system] {style}")
-
         if dry_run:
             mode = ExecutionMode.DRY_RUN
         elif execute:
             mode = ExecutionMode.EXECUTE
         else:
             mode = ExecutionMode.PREVIEW
-
         if mode == ExecutionMode.EXECUTE and not yes:
             print(f"About to run: {query}")
             ans = input("Run this? [y/N] ").strip().lower()
             if ans not in ("y", "yes"):
                 print("Cancelled.")
                 return
-
         result = self.executor.execute_safe(query, mode=mode)
         if result.success:
             print(result.stdout)
@@ -284,23 +268,22 @@ environment.systemPackages = with pkgs; [
         return True
 
     def handle_query(self, query: str, args: argparse.Namespace):
+        if query.lower() in ("help", "--help", "-h"):
+            self.show_help()
+            return
         if query.lower().startswith("code "):
             self.handle_code(query[5:])
             return
-
         if args.explain:
             query_type = QueryType.EXPLAIN
             subject = None
         else:
             query_type, subject = self.router.classify(query)
-
         if self._is_bare_package(query) and query_type != QueryType.EXPLAIN:
             query = f"install {query}"
             query_type = QueryType.CONTROL
-
         if not self.quiet and not self.raw:
             print(f"\nAINIX · {query_type.value}")
-
         if query_type == QueryType.HELP:
             self.handle_help_query(query, subject)
         elif query_type == QueryType.EXPLAIN:
@@ -314,7 +297,7 @@ environment.systemPackages = with pkgs; [
             self.handle_help_query(query, subject)
 
     def interactive(self):
-        print(f"AINIX {VERSION} — empty line or 'quit' to exit")
+        print(f"AINIX {VERSION} — type 'help' or empty line to exit")
         print("Preview never changes the system.\n")
         while True:
             try:
@@ -324,6 +307,9 @@ environment.systemPackages = with pkgs; [
                 break
             if not line or line.lower() in ("quit", "exit"):
                 break
+            if line.lower() == "help":
+                self.show_help()
+                continue
             if line.lower() == "examples":
                 self._examples()
                 continue
@@ -348,11 +334,10 @@ environment.systemPackages = with pkgs; [
     def _examples(self):
         print("""
 Examples:
+  ainix help
   ainix "How do I install a package?"
   ainix install firefox
   ainix code "enable openssh"
-  ainix code "flake for myhost"
-  ainix code "package mytool not in nixpkgs"
   ainix --history
 """.strip())
 
@@ -370,7 +355,7 @@ def main():
     parser.add_argument("--examples", action="store_true")
     parser.add_argument("--history", action="store_true")
     parser.add_argument("--note", metavar="TEXT")
-    parser.add_argument("--code", metavar="REQUEST", help="Generate Nix/NixOS/flake snippet")
+    parser.add_argument("--code", metavar="REQUEST")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
 
