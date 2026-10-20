@@ -1,87 +1,71 @@
-# AINIX: AI-Native NixOS Integration
+# AINIX
 
-AINIX is an intelligent assistant for NixOS that combines **Help** (advisory, knowledge) and **Control** (execution, automation) into a single unified system.
+Local NixOS assistant: Help (explain) + Control (preview, then optional execute).
 
-## Architecture
+Preview is the default. Nothing runs unless you pass `--execute`.
 
-```
-AINIX = Help System + Control Agent
-
-User Query
-├─ Is it a question? → Help: explain, advise, guide
-└─ Is it a command? → Control: execute, verify, learn
-```
-
-## Core Principles
-
-1. **Help First**: Explain what's happening
-2. **Control Second**: Execute safely with guardrails
-3. **Learn Always**: Remember what worked/failed
-4. **Safe by Default**: Preview mode, validation, and optional rollback
-
-## Components
-
-### Help Layer (`help/`)
-- Knowledge base about NixOS, packages, configurations
-- Advisory queries ("how do I...?")
-- Explanations of Nix concepts
-- Recommendations and best practices
-
-### Control Layer (`control/`)
-- Command execution with safety checks
-- Package installation and management
-- Configuration rebuilds
-- System state management
-
-### Core System (`core/`)
-- Query routing (help vs control)
-- Safety guardrails and validation
-- Local learning/memory system
-
-### Configuration (`config/`)
-- AINIX settings and policies
-- Allowed operations whitelist/blacklist
-- Learning preferences
-
-## Usage
+## Install (any NixOS machine)
 
 ```bash
-# Ask for help
-ainix "How do I install a package?"
-
-# Execute a command (with guardrails)
-ainix install firefox
-
-# Show reasoning
-ainix --explain "What would happen if I..."
+nix profile add github:jdnitrap/AINIX --no-write-lock-file
 ```
 
-## Safety Features
+Then:
 
-1. **Dry-run / Preview by Default**: Show what would happen before doing it
-2. **Rollback Support**: Track system state, enable rollback
-3. **Permission Model**: Different permission levels for different operations
-4. **Audit Trail**: Log all executed commands
-5. **Dangerous operation detection**: Blocks risky commands unless explicitly approved
+```bash
+ainix --help
+ainix "How do I install a package?"
+ainix install firefox          # preview only
+```
 
-## Learning System
+Remove later:
 
-AINIX learns from:
-- Successful operations (build cache, configuration patterns)
-- Failed operations (what to avoid, error patterns)
-- User preferences (which solutions you prefer)
-- Performance metrics (which approaches are fastest)
+```bash
+nix profile remove ainix
+```
 
-## Current Status
+### Why the flag
 
-- Help layer: Foundation
-- Control layer: Under development
-- Core routing: Planned
-- Learning system: Planned
+The repo has no committed `flake.lock` yet. Nix tries to write one on install and fails on a remote flake. `--no-write-lock-file` skips that.
 
-## Next Steps
+A committed lock file would make the plain command work. If you can, generate one and open a PR (see below).
 
-1. Implement query classification (help vs control)
-2. Build help knowledge base
-3. Implement control execution with guards
-4. Add learning/memory system
+## One-shot (no install)
+
+```bash
+nix run github:jdnitrap/AINIX --no-write-lock-file -- "How do I install a package?"
+```
+
+## System-wide (optional)
+
+```nix
+inputs.ainix.url = "github:jdnitrap/AINIX";
+# modules = [ ainix.nixosModules.default ];
+# services.ainix.enable = true;
+```
+
+## What it does
+
+- **Help**: answers from a small local base, then falls back to `nixos-option` / `nix search` when available
+- **Control**: shows a preview (and a dry-run for nix commands when possible). Logs real executions to `~/.local/share/ainix/commands.log`
+- Blocks obviously dangerous commands unless you force them
+
+## Contribute
+
+1. Fork and clone
+2. `nix develop` or just edit and test with `python3 ainix.py "..."`
+3. Open a PR
+
+Helpful first contributions:
+- Generate and commit a `flake.lock` so install works without the flag:
+  ```bash
+  nix flake lock
+  git add flake.lock
+  ```
+- Expand the knowledge base in `help/knowledge_base.py`
+- Improve preview / dry-run behavior in `control/executor.py`
+- Add tests
+
+## Status
+
+Early. Usable for help and preview. Do not rely on `--execute` for important system changes yet.
