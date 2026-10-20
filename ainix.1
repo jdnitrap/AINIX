@@ -1,0 +1,94 @@
+.TH AINIX 1 "October 2026" "AINIX 0.4" "User Commands"
+.SH NAME
+ainix \- local NixOS assistant (help, preview, code)
+.SH SYNOPSIS
+.B ainix
+[\,OPTIONS\/] [\,QUERY\/]
+.SH DESCRIPTION
+AINIX is a local assistant for NixOS. It answers questions from a small
+knowledge base and real Nix tools, shows previews of commands, and can
+generate Nix, NixOS, and flake snippets.
+.PP
+Preview is the default. Nothing is executed or written unless you
+explicitly pass \fB--execute\fR.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Show help and exit.
+.TP
+.B \-\-version
+Print version and exit.
+.TP
+.B \-\-examples
+Print common usage examples.
+.TP
+.B \-\-list
+List local knowledge topics.
+.TP
+.B \-\-history
+Show recent queries.
+.TP
+.B \-\-note TEXT
+Save a note that Help can search later.
+.TP
+.B \-\-code REQUEST
+Generate a Nix, NixOS, or flake snippet. Does not write files.
+.TP
+.B \-\-explain
+Explain a command.
+.TP
+.B \-\-execute, \-x
+Actually run a control command. Asks for confirmation unless \fB--yes\fR.
+.TP
+.B \-\-yes, \-y
+Skip the confirmation prompt on execute.
+.TP
+.B \-\-dry-run
+Simulate without running.
+.TP
+.B \-\-raw
+Print the answer only.
+.TP
+.B \-\-quiet
+Less decoration.
+.SH USAGE
+.TP
+.B ainix "How do I install a package?"
+Help query. Uses local knowledge and Nix docs.
+.TP
+.B ainix install firefox
+.TQ
+.B ainix firefox
+Control preview. Shows profile and declarative install lines.
+.TP
+.B ainix code "enable openssh"
+Generate a configuration snippet.
+.TP
+.B ainix code "flake for myhost"
+Generate a flake.nix.
+.TP
+.B ainix code "package mytool not in nixpkgs"
+Generate a custom derivation.
+.TP
+.B ainix
+Start interactive mode.
+.SH FILES
+.TP
+.I ~/.local/share/ainix/history.log
+Query history.
+.TP
+.I ~/.local/share/ainix/notes.txt
+Saved notes.
+.TP
+.I ~/.local/share/ainix/cache/
+Cached Nix doc lookups.
+.TP
+.I ~/.local/share/ainix/commands.log
+Log of executed commands.
+.SH NOTES
+AINIX does not edit your configuration files. Generated code is printed
+for you to copy. Dangerous commands are blocked unless explicitly forced.
+.SH SEE ALSO
+.BR nix (1),
+.BR nixos-rebuild (8),
+.BR nixos-option (8)
