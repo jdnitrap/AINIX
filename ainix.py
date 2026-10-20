@@ -6,10 +6,11 @@ AINIX: AI-Native NixOS Integration
 import sys
 import argparse
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -25,8 +26,10 @@ class AINIX:
         self.knowledge = HelpKnowledgeBase()
         self.quiet = quiet
         self.raw = raw
-        self.history_file = Path.home() / ".local" / "share" / "ainix" / "history.log"
-        self.history_file.parent.mkdir(parents=True, exist_ok=True)
+        self.data_dir = Path.home() / ".local" / "share" / "ainix"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.history_file = self.data_dir / "history.log"
+        self.notes_file = self.data_dir / "notes.txt"
 
     def _record(self, query: str, kind: str):
         entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
@@ -45,6 +48,47 @@ class AINIX:
             except json.JSONDecodeError:
                 continue
 
+    def detect_style(self) -> str:
+        """flakes or channels."""
+        if Path("/etc/nixos/flake.nix").exists() or Path("flake.nix").exists():
+            return "flakes"
+        return "channels"
+
+    def add_note(self, text: str):
+        with open(self.notes_file, "a") as f:
+            f.write(text.strip() + "\n")
+        print(f"Noted: {text.strip()}")
+
+    def search_notes(self, query: str) -> list:
+        if not self.notes_file.exists():
+            return []
+        q = query.lower()
+        hits = []
+        for line in self.notes_file.read_text().splitlines():
+            if q in line.lower():
+                hits.append(line)
+        return hits
+
+    def explain_error(self, text: str) -> str:
+        t = text.lower()
+        tips = []
+        if "collision" in t or "already exists" in t:
+            tips.append("Package collision: two packages provide the same file. Use priority or remove one.")
+        if "attribute" in t and "missing" in t:
+            tips.append("Missing attribute: the package or option name is wrong, or it was renamed.")
+        if "infinite recursion" in t:
+            tips.append("Infinite recursion: an option or overlay refers to itself. Check recent changes.")
+        if "hash mismatch" in t or "hash" in t and "expected" in t:
+            tips.append("Hash mismatch: the source changed. Update the hash or clear the cache.")
+        if "permission denied" in t:
+            tips.append("Permission denied: you may need sudo, or the path is not writable.")
+        if "no such file" in t or "not found" in t:
+            tips.append("File or package not found. Check the name and that the input is available.")
+        if not tips:
+            tips.append("No specific pattern matched. Check the full error and recent config changes.")
+        tips.append("You can roll back with: sudo nixos-rebuild switch --rollback")
+        return "\n".join(f"- {x}" for x in tips)
+
     def handle_help_query(self, query: str, subject: str = None):
         if not self.quiet and not self.raw:
             print("\n📚 Help")
@@ -53,17 +97,32 @@ class AINIX:
         search_term = subject or query
         self._record(search_term, "help")
 
+        style = self.detect_style()
+        if not self.raw:
+            print(f"[system] {style}")
+
+        notes = self.search_notes(search_term)
+        if notes and not self.raw:
+            print("\n[notes]")
+            for n in notes[:5]:
+                print(f"  {n}")
+
+        # Error-like paste
+        if any(w in search_term.lower() for w in ("error", "failed", "collision", "recursion")):
+            print("\n[error hint]")
+            print(self.explain_error(search_term))
+
         results = self.knowledge.search(search_term)
         if results and not self.raw:
             top = results[0]
             print(f"\n[local] {top.topic}\n")
             print(top.content.strip())
+            if style == "flakes" and "nixos-rebuild" in top.topic:
+                print("\nFlakes: use sudo nixos-rebuild switch --flake .#hostname")
             if top.examples:
                 print("\nExamples:")
                 for ex in top.examples:
                     print(f"  {ex}")
-            if len(results) > 1:
-                print(f"\nAlso related: {', '.join(e.topic for e in results[1:])}")
 
         docs = self.knowledge.lookup_docs(search_term)
         has_docs = docs and "No matching" not in docs and "not on PATH" not in docs
@@ -71,15 +130,13 @@ class AINIX:
             if not self.raw:
                 print("\n--- Nix docs ---")
             print(docs)
-        elif not results:
-            # Optional Ollama when local and docs both miss
+        elif not results and not notes:
             ollama = self.knowledge.ollama_fallback(search_term)
             if ollama:
                 print("\n--- Ollama (local model) ---")
                 print(ollama)
             else:
                 print(f"No local knowledge or Nix docs for '{search_term}'.")
-                print(docs or f"Try: nix search nixpkgs {search_term}")
 
     def handle_control_query(self, query: str, subject: str = None,
                              explain: bool = False, dry_run: bool = False,
@@ -93,6 +150,10 @@ class AINIX:
             print("-" * 40)
 
         self._record(query, "control")
+
+        style = self.detect_style()
+        if not self.raw:
+            print(f"[system] {style}")
 
         if dry_run:
             mode = ExecutionMode.DRY_RUN
@@ -113,6 +174,8 @@ class AINIX:
         if result.success:
             print(result.stdout)
             if mode == ExecutionMode.PREVIEW and not self.raw:
+                if style == "flakes":
+                    print("\nFlakes rebuild: sudo nixos-rebuild switch --flake .#hostname")
                 print("\nTo execute: ainix --execute --yes <command>")
                 print("Preview never changes the system.")
         else:
@@ -176,12 +239,13 @@ class AINIX:
             if line.lower() == "history":
                 self.show_history()
                 continue
-            if line.lower() in ("preview that", "explain that") and last:
-                line = last if line.startswith("explain") else f"install {last.split()[-1]}"
+            if line.lower().startswith("note "):
+                self.add_note(line[5:])
+                continue
             last = line
             class A: pass
             a = A()
-            a.explain = line.lower().startswith("explain")
+            a.explain = False
             a.dry_run = False
             a.execute = False
             a.yes = False
@@ -194,7 +258,7 @@ Examples:
   ainix "How do I install a package?"
   ainix install firefox
   ainix firefox
-  ainix "services.openssh.enable"
+  ainix note "remember this"
   ainix --history
   ainix            (interactive)
 """.strip())
@@ -212,6 +276,7 @@ def main():
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--examples", action="store_true")
     parser.add_argument("--history", action="store_true")
+    parser.add_argument("--note", metavar="TEXT", help="Save a note")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
 
@@ -223,6 +288,9 @@ def main():
 
     ainix = AINIX(config_path=args.config, quiet=args.quiet, raw=args.raw)
 
+    if args.note:
+        ainix.add_note(args.note)
+        return
     if args.examples:
         ainix._examples()
         return
