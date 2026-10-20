@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -19,7 +19,8 @@ from control.executor import SafeExecutor, ExecutionMode
 from help.knowledge_base import HelpKnowledgeBase
 
 
-def load_model_from_config(config_path=None):
+def load_config(config_path=None):
+    """Return dict from config file, or {}."""
     paths = []
     if config_path:
         paths.append(Path(config_path))
@@ -27,18 +28,23 @@ def load_model_from_config(config_path=None):
     for p in paths:
         if p.exists():
             try:
-                data = json.loads(p.read_text())
-                return data.get("model")
+                return json.loads(p.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
-    return None
+    return {}
 
 
 class AINIX:
-    def __init__(self, config_path=None, quiet=False, raw=False, model=None):
+    def __init__(self, config_path=None, quiet=False, raw=False, model=None, model_first=None):
         self.router = QueryRouter()
         self.executor = SafeExecutor(config_path)
-        chosen = model or load_model_from_config(config_path)
+        cfg = load_config(config_path)
+        chosen = model or cfg.get("model")
+        # model_first: flag wins, then config, default False (docs first)
+        if model_first is None:
+            self.model_first = bool(cfg.get("model_first", False))
+        else:
+            self.model_first = model_first
         self.knowledge = HelpKnowledgeBase(model=chosen)
         self.quiet = quiet
         self.raw = raw
@@ -50,7 +56,20 @@ class AINIX:
 
     def show_help(self):
         model = self.knowledge.pick_model() or "none"
-        print(f"AINIX {VERSION}\nModel: {model}\nUse --model NAME or ~/.config/ainix/config.json")
+        mode = "model-first" if self.model_first else "docs-first"
+        print(f"""AINIX {VERSION}
+Mode:  {mode}
+Model: {model}
+
+Set once in ~/.config/ainix/config.json:
+  {{"model": "gemma2:9b", "model_first": true}}
+
+Or per run:
+  ainix --model-first "question"
+  ainix --docs-first "question"
+
+Default is docs-first. Model is optional.
+""")
 
     def uninstall(self):
         paths = [
@@ -100,60 +119,48 @@ class AINIX:
             f.write(text.strip() + "\n")
         print(f"Noted: {text.strip()}")
 
-    def search_notes(self, query):
-        if not self.notes_file.exists():
-            return []
-        q = query.lower()
-        return [ln for ln in self.notes_file.read_text().splitlines() if q in ln.lower()]
-
-    def explain_error(self, text):
-        return "Check the error and recent changes. Rollback: sudo nixos-rebuild switch --rollback"
-
-    def generate_code(self, request):
-        r = request.lower()
-        if "flake" in r:
-            return '{ inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; }\n'
-        if "enable" in r:
-            return "services.openssh.enable = true;\n"
-        return f"# Snippet for: {request}\n"
-
-    def handle_code(self, request, out_path=None):
-        code = self.generate_code(request)
-        if out_path:
-            Path(out_path).write_text(code)
-            print(f"Wrote {out_path}")
-        else:
-            print(code)
-
     def handle_help_query(self, query, subject=None):
         search_term = subject or query
         self._record(search_term, "help")
         if not self.raw:
-            print(f"[system] {self.detect_style()}")
-        results = self.knowledge.search(search_term)
-        if results and not self.raw:
-            print(results[0].content.strip())
-        docs = self.knowledge.lookup_docs(search_term)
-        if docs and "No matching" not in docs:
-            print("\n--- Nix docs ---")
-            print(docs)
-            return
-        web = self.knowledge.web_search(search_term)
-        if web:
-            print("\n--- web ---")
-            print(web)
-        model_out = self.knowledge.ollama_fallback(search_term)
-        if model_out:
-            print("\n--- local model ---")
-            print(model_out)
-        elif not results and not web:
-            print(f"No knowledge for '{search_term}'.")
+            mode = "model-first" if self.model_first else "docs-first"
+            print(f"[{mode}]")
+
+        def show_model():
+            out = self.knowledge.ollama_fallback(search_term)
+            if out:
+                print("\n--- local model ---")
+                print(out)
+                return True
+            return False
+
+        def show_docs_and_web():
+            results = self.knowledge.search(search_term)
+            if results and not self.raw:
+                print(results[0].content.strip())
+            docs = self.knowledge.lookup_docs(search_term)
+            if docs and "No matching" not in docs:
+                print("\n--- Nix docs ---")
+                print(docs)
+                return True
+            web = self.knowledge.web_search(search_term)
+            if web:
+                print("\n--- web ---")
+                print(web)
+                return True
+            return bool(results)
+
+        if self.model_first:
+            got = show_model()
+            if not got:
+                show_docs_and_web()
+        else:
+            got = show_docs_and_web()
+            if not got:
+                show_model()
 
     def handle_control_query(self, query, subject=None, explain=False,
                              dry_run=False, execute=False, yes=False):
-        if explain:
-            print(self.knowledge.explain_command(query.split()[0] if query.split() else ""))
-            return
         self._record(query, "control")
         mode = ExecutionMode.EXECUTE if execute else ExecutionMode.PREVIEW
         if mode == ExecutionMode.EXECUTE and not yes:
@@ -177,9 +184,6 @@ class AINIX:
             return
         if query.lower() == "uninstall":
             self.uninstall()
-            return
-        if query.lower().startswith("code "):
-            self.handle_code(query[5:], getattr(args, "out", None))
             return
         query_type, subject = self.router.classify(query)
         if self._is_bare_package(query):
@@ -209,7 +213,6 @@ class AINIX:
             a = A()
             a.execute = False
             a.yes = False
-            a.out = None
             self.handle_query(line, a)
 
 
@@ -223,11 +226,11 @@ def main():
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--history", action="store_true")
     parser.add_argument("--note", metavar="TEXT")
-    parser.add_argument("--code", metavar="REQUEST")
-    parser.add_argument("--out", metavar="FILE")
     parser.add_argument("--cache-clear", action="store_true")
     parser.add_argument("--uninstall", action="store_true")
     parser.add_argument("--model", metavar="NAME", help="Ollama model (optional)")
+    parser.add_argument("--model-first", action="store_true", help="Ask model first")
+    parser.add_argument("--docs-first", action="store_true", help="Docs/web first (default)")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
     args = parser.parse_args()
@@ -236,7 +239,19 @@ def main():
         print(VERSION)
         return
 
-    ainix = AINIX(config_path=args.config, quiet=args.quiet, raw=args.raw, model=args.model)
+    model_first = None
+    if args.model_first:
+        model_first = True
+    elif args.docs_first:
+        model_first = False
+
+    ainix = AINIX(
+        config_path=args.config,
+        quiet=args.quiet,
+        raw=args.raw,
+        model=args.model,
+        model_first=model_first,
+    )
 
     if args.uninstall:
         ainix.uninstall()
@@ -246,9 +261,6 @@ def main():
         return
     if args.note:
         ainix.add_note(args.note)
-        return
-    if args.code:
-        ainix.handle_code(args.code, args.out)
         return
     if args.list:
         print("\n".join(ainix.knowledge.list_topics()))
