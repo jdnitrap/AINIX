@@ -6,10 +6,11 @@ AINIX: AI-Native NixOS Integration
 import sys
 import argparse
 import json
+import shutil
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -29,29 +30,49 @@ class AINIX:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.history_file = self.data_dir / "history.log"
         self.notes_file = self.data_dir / "notes.txt"
+        self.cache_dir = self.data_dir / "cache"
 
     def show_help(self):
         print(f"""AINIX {VERSION} — local NixOS assistant
 
 Usage:
-  ainix help                         this help
-  ainix --help                       argparse help
-  ainix "How do I install a package?"  ask a question
-  ainix install firefox              preview an install
-  ainix firefox                      same (bare name)
-  ainix code "enable openssh"        generate NixOS snippet
-  ainix code "flake for myhost"      generate flake.nix
-  ainix code "package mytool not in nixpkgs"
-  ainix --note "remember this"       save a note
-  ainix --history                    recent queries
-  ainix --list                       knowledge topics
-  ainix --examples                   short examples
-  ainix --version                    version
-  ainix                              interactive mode
-  man ainix                          man page
+  ainix help
+  ainix "How do I install a package?"
+  ainix install firefox
+  ainix code "enable openssh"
+  ainix code "enable openssh" --out snippet.nix
+  ainix --note "remember this"
+  ainix --history
+  ainix --cache-clear
+  ainix uninstall
+  ainix --version
+  man ainix
 
-Preview is the default. Nothing runs or is written unless you pass --execute.
+Preview is the default. Nothing runs or is written unless you ask.
 """)
+
+    def uninstall(self):
+        """Remove the curl-installed files."""
+        paths = [
+            Path.home() / ".local" / "bin" / "ainix",
+            Path.home() / ".local" / "share" / "ainix",
+            Path.home() / ".local" / "share" / "man" / "man1" / "ainix.1",
+        ]
+        for p in paths:
+            if p.is_file():
+                p.unlink()
+                print(f"removed {p}")
+            elif p.is_dir():
+                shutil.rmtree(p)
+                print(f"removed {p}")
+        print("Uninstalled. (Nix profile installs are separate: nix profile remove AINIX)")
+
+    def cache_clear(self):
+        if self.cache_dir.exists():
+            shutil.rmtree(self.cache_dir)
+            print(f"cleared {self.cache_dir}")
+        else:
+            print("no cache")
 
     def _record(self, query: str, kind: str):
         entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
@@ -108,42 +129,27 @@ Preview is the default. Nothing runs or is written unless you pass --execute.
 
     def generate_code(self, request: str) -> str:
         r = request.lower().strip()
-
         if any(w in r for w in ("package", "derivation", "not in nixpkgs", "custom program", "write a program")):
             name = "myprogram"
             for w in request.split():
                 if w.isidentifier() and w.lower() not in ("package", "derivation", "a", "the", "program"):
                     name = w
                     break
-            return f'''# Custom derivation (not from nixpkgs)
-# Save as {name}.nix and use via pkgs.callPackage ./{name}.nix {{}}
-
+            return f'''# Custom derivation
 {{ lib, stdenv, fetchurl }}:
-
 stdenv.mkDerivation rec {{
   pname = "{name}";
   version = "0.1.0";
-
   src = fetchurl {{
     url = "https://example.com/{name}-${{version}}.tar.gz";
     hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
   }};
-
-  installPhase = ''
-    mkdir -p $out/bin
-  '';
-
-  meta = with lib; {{
-    description = "Custom {name}";
-    license = licenses.mit;
-    platforms = platforms.linux;
-  }};
+  installPhase = ''mkdir -p $out/bin'';
+  meta = with lib; {{ description = "Custom {name}"; license = licenses.mit; }};
 }}
 '''
-
         if "flake" in r:
-            return '''# flake.nix
-{
+            return '''{
   description = "My NixOS config";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   outputs = { self, nixpkgs }: {
@@ -154,41 +160,28 @@ stdenv.mkDerivation rec {{
   };
 }
 '''
-
         if "enable" in r or "service" in r:
-            return '''# Add to configuration.nix
-services.openssh.enable = true;
-'''
-
-        if "install" in r or "add package" in r or "systempackages" in r:
+            return "services.openssh.enable = true;\n"
+        if "install" in r or "add package" in r:
             pkg = request.split()[-1] if len(request.split()) > 1 else "firefox"
-            return f'''# Add to configuration.nix
-environment.systemPackages = with pkgs; [
-  {pkg}
-];
-'''
-
+            return f"environment.systemPackages = with pkgs; [ {pkg} ];\n"
         ollama = self.knowledge.ollama_fallback(
-            "Write a short NixOS configuration.nix snippet for: " + request +
-            ". Output only Nix code. Do not invent options."
+            "Write a short NixOS snippet for: " + request + ". Output only Nix code."
         )
         if ollama:
-            return "# From Ollama (review before use)\n" + ollama
+            return "# From Ollama (review)\n" + ollama
+        return f"# Snippet for: {request}\n# environment.systemPackages = with pkgs; [ ];\n"
 
-        return f'''# Generic NixOS snippet for: {request}
-{{ config, pkgs, ... }}:
-{{
-  # environment.systemPackages = with pkgs; [ ];
-  # services.<name>.enable = true;
-}}
-'''
-
-    def handle_code(self, request: str):
+    def handle_code(self, request: str, out_path: str = None):
         self._record(request, "code")
-        print("\n--- generated (preview only, not written) ---")
-        print(self.generate_code(request))
-        print("--- end ---")
-        print("This does not change any files.")
+        code = self.generate_code(request)
+        if out_path:
+            Path(out_path).write_text(code)
+            print(f"Wrote {out_path}")
+        else:
+            print("\n--- generated (not written) ---")
+            print(code)
+            print("--- end ---")
 
     def handle_help_query(self, query: str, subject: str = None):
         if not self.quiet and not self.raw:
@@ -221,10 +214,11 @@ environment.systemPackages = with pkgs; [
         elif not results and not notes:
             ollama = self.knowledge.ollama_fallback(search_term)
             if ollama:
-                print("\n--- Ollama (local model) ---")
+                print("\n--- Ollama ---")
                 print(ollama)
             else:
-                print(f"No local knowledge or Nix docs for '{search_term}'.")
+                print(f"No knowledge for '{search_term}'.")
+                print(f"Try: nix search nixpkgs {search_term}")
 
     def handle_control_query(self, query: str, subject: str = None,
                              explain: bool = False, dry_run: bool = False,
@@ -271,8 +265,11 @@ environment.systemPackages = with pkgs; [
         if query.lower() in ("help", "--help", "-h"):
             self.show_help()
             return
+        if query.lower() == "uninstall":
+            self.uninstall()
+            return
         if query.lower().startswith("code "):
-            self.handle_code(query[5:])
+            self.handle_code(query[5:], getattr(args, "out", None))
             return
         if args.explain:
             query_type = QueryType.EXPLAIN
@@ -298,7 +295,6 @@ environment.systemPackages = with pkgs; [
 
     def interactive(self):
         print(f"AINIX {VERSION} — type 'help' or empty line to exit")
-        print("Preview never changes the system.\n")
         while True:
             try:
                 line = input("ainix> ").strip()
@@ -310,17 +306,11 @@ environment.systemPackages = with pkgs; [
             if line.lower() == "help":
                 self.show_help()
                 continue
-            if line.lower() == "examples":
-                self._examples()
+            if line.lower() == "uninstall":
+                self.uninstall()
                 continue
-            if line.lower() == "list":
-                print("\n".join(self.knowledge.list_topics()))
-                continue
-            if line.lower() == "history":
-                self.show_history()
-                continue
-            if line.lower().startswith("note "):
-                self.add_note(line[5:])
+            if line.lower() == "cache clear":
+                self.cache_clear()
                 continue
             class A: pass
             a = A()
@@ -328,18 +318,9 @@ environment.systemPackages = with pkgs; [
             a.dry_run = False
             a.execute = False
             a.yes = False
+            a.out = None
             self.handle_query(line, a)
             print()
-
-    def _examples(self):
-        print("""
-Examples:
-  ainix help
-  ainix "How do I install a package?"
-  ainix install firefox
-  ainix code "enable openssh"
-  ainix --history
-""".strip())
 
 
 def main():
@@ -356,6 +337,9 @@ def main():
     parser.add_argument("--history", action="store_true")
     parser.add_argument("--note", metavar="TEXT")
     parser.add_argument("--code", metavar="REQUEST")
+    parser.add_argument("--out", metavar="FILE", help="Write code to file")
+    parser.add_argument("--cache-clear", action="store_true")
+    parser.add_argument("--uninstall", action="store_true")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--config", metavar="PATH")
 
@@ -367,14 +351,17 @@ def main():
 
     ainix = AINIX(config_path=args.config, quiet=args.quiet, raw=args.raw)
 
+    if args.uninstall:
+        ainix.uninstall()
+        return
+    if args.cache_clear:
+        ainix.cache_clear()
+        return
     if args.note:
         ainix.add_note(args.note)
         return
     if args.code:
-        ainix.handle_code(args.code)
-        return
-    if args.examples:
-        ainix._examples()
+        ainix.handle_code(args.code, args.out)
         return
     if args.list:
         print("\n".join(ainix.knowledge.list_topics()))
