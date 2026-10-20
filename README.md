@@ -2,30 +2,32 @@
 
 Local NixOS assistant. Preview by default. Model is optional.
 
-## Install (no clone, no Nix)
+## Install
+
+One command. On NixOS it uses `nix profile` (Python included). Elsewhere it uses a local install if Python is present.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jdnitrap/AINIX/main/install.sh | bash
 ```
 
-Puts `ainix` in `~/.local/bin`. Ensure that is on your PATH.
+Then:
 
 ```bash
 ainix help
-ainix --version
 ```
 
 ## Uninstall
 
+NixOS / nix profile:
+
 ```bash
-ainix uninstall
+nix profile remove AINIX
 ```
 
-Or manually:
+Curl install:
 
 ```bash
-rm ~/.local/bin/ainix
-rm -rf ~/.local/share/ainix
+ainix uninstall
 ```
 
 ## Usage
@@ -33,38 +35,22 @@ rm -rf ~/.local/share/ainix
 ```bash
 ainix "How do I install a package?"
 ainix install firefox
-ainix firefox
 ainix --history
 ainix --cache-clear
-man ainix
 ```
 
 ## Help order
 
-Default is **docs-first**:
-1. Local knowledge
-2. Nix docs (`nixos-option`, `nix search`)
-3. Web (if online)
-4. Local model (if available and the above miss)
+Default is **docs-first**: local knowledge, Nix docs, web if online, then local model if needed.
 
-**Model-first** (optional): ask the local model immediately.
-
-Set once:
+**Model-first** (optional):
 
 ```bash
 mkdir -p ~/.config/ainix
 echo '{"model": "gemma2:9b", "model_first": true}' > ~/.config/ainix/config.json
 ```
 
-Or per run:
-
-```bash
-ainix --model-first "question"
-ainix --docs-first "question"
-ainix --model gemma2:9b "question"
-```
-
-No model is required. Works on any hardware. Ollama handles NVIDIA, AMD, or CPU if you want a model.
+No model is required. Ollama handles NVIDIA, AMD, or CPU if you want one.
 
 ## Local model (optional)
 
@@ -72,5 +58,3 @@ No model is required. Works on any hardware. Ollama handles NVIDIA, AMD, or CPU 
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull gemma2:9b
 ```
-
-Then point AINIX at it with `--model` or the config file above.
