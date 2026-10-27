@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.5.2"
+VERSION = "0.6.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
