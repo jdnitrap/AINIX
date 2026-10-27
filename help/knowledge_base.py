@@ -54,18 +54,52 @@ Activate configuration changes:
   sudo nixos-rebuild switch --rollback
             """,
             tags=["nixos", "rebuild", "system"],
-            related_topics=["nix-package-management"],
+            related_topics=["nix-package-management", "generations"],
             examples=["nixos-rebuild switch"]
+        )
+        self.add_entry(
+            topic="flakes",
+            content="""
+Flakes pin inputs and define outputs.
+
+Typical rebuild:
+  sudo nixos-rebuild switch --flake .#hostname
+
+Check for a flake:
+  ls flake.nix
+  or /etc/nixos/flake.nix
+            """,
+            tags=["flake", "flakes", "nix"],
+            related_topics=["nixos-rebuild"],
+            examples=["sudo nixos-rebuild switch --flake .#hostname"]
+        )
+        self.add_entry(
+            topic="generations",
+            content="""
+NixOS keeps previous system generations.
+
+List:
+  nixos-rebuild list-generations
+
+Rollback:
+  sudo nixos-rebuild switch --rollback
+
+Or select an older generation at the boot menu.
+            """,
+            tags=["generation", "generations", "rollback"],
+            related_topics=["nixos-rebuild"],
+            examples=["nixos-rebuild list-generations"]
         )
         self.add_entry(
             topic="ainix-usage",
             content="""
 AINIX is a local NixOS assistant.
 Help, preview, and optional local model. Model is not required.
+Preview never changes the system.
             """,
             tags=["ainix", "usage"],
             related_topics=[],
-            examples=["ainix help"]
+            examples=["ainix help", "ainix start"]
         )
 
     def add_entry(self, topic, content, tags, related_topics, examples):
