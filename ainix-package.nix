@@ -2,7 +2,7 @@
 
 python3.pkgs.buildPythonApplication {
   pname = "ainix";
-  version = "0.4.0";
+  version = "0.6.0";
   pyproject = false;
 
   src = ./.;
