@@ -5,7 +5,6 @@ AINIX Control Executor: preview with real Nix commands, then optional execute.
 
 import subprocess
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List, Any
@@ -91,24 +90,12 @@ class SafeExecutor:
         if len(parts) >= 2 and parts[0].lower() in ("install", "add"):
             return self._install_preview(parts[1])
 
-        lines = [
+        return [
             "Read-only / preview.",
             f"Would execute: {command}",
             "",
             "Preview never changes the system.",
         ]
-        if command.strip().startswith(("nix ", "nixos-rebuild")):
-            try:
-                r = subprocess.run(
-                    command, shell=True, capture_output=True, text=True, timeout=30
-                )
-                if r.stdout or r.stderr:
-                    lines.append("")
-                    lines.append("Tool output:")
-                    lines.append((r.stdout or r.stderr)[:800])
-            except (subprocess.TimeoutExpired, Exception):
-                lines.append("(tool timed out or unavailable)")
-        return lines
 
     def execute_safe(self, command: str, mode: ExecutionMode = ExecutionMode.PREVIEW) -> ExecutionResult:
         ok, err = self.validate_command(command)
