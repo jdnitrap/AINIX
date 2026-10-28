@@ -1,4 +1,4 @@
-.TH AINIX 1 "October 2026" "AINIX 0.6" "User Commands"
+.TH AINIX 1 "October 2026" "AINIX 0.7" "User Commands"
 .SH NAME
 ainix \- local NixOS assistant
 .SH SYNOPSIS
@@ -11,6 +11,12 @@ base, real Nix tools, optional web search, and an optional local model.
 Default help order is docs-first. Model-first is optional.
 Preview is the default for control. Nothing runs unless you pass
 \fB--execute\fR.
+.PP
+.B ainix rebuild
+shows the flake-aware or channels rebuild command and a dry-build line.
+.PP
+.B ainix home
+shows a Home Manager switch command if a config is detected.
 .SH OPTIONS
 .TP
 .B help
