@@ -7,10 +7,11 @@ import sys
 import argparse
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -54,7 +55,9 @@ class AINIX:
 
     def show_start(self):
         style = self.detect_style()
-        rebuild = "sudo nixos-rebuild switch --flake .#hostname" if style == "flakes" else "sudo nixos-rebuild switch"
+        rebuild = self._rebuild_cmd()
+        hm = self._home_manager_cmd()
+        extra = f"\n5. Home Manager (if present)\n   {hm}\n" if hm else ""
         print(f"""AINIX start — first steps on NixOS
 
 Your system looks like: {style}
@@ -78,8 +81,9 @@ Your system looks like: {style}
 4. Ask AINIX next
    ainix "How do I enable ssh?"
    ainix install vim
+   ainix rebuild
    ainix help
-
+{extra}
 Preview never changes the system. Nothing runs unless you pass --execute.
 """)
 
@@ -95,6 +99,8 @@ New here?  ainix start
 Or:
   ainix --model-first "question"
   ainix --docs-first "question"
+  ainix rebuild
+  ainix home
 
 Default is docs-first. Model is optional.
 """)
@@ -141,6 +147,90 @@ Default is docs-first. Model is optional.
         if Path("/etc/nixos/flake.nix").exists() or Path("flake.nix").exists():
             return "flakes"
         return "channels"
+
+    def detect_home_manager(self):
+        candidates = [
+            Path.home() / ".config" / "home-manager" / "home.nix",
+            Path.home() / ".config" / "nixpkgs" / "home.nix",
+            Path("home.nix"),
+            Path("home-manager") / "home.nix",
+        ]
+        for p in candidates:
+            if p.exists():
+                return str(p)
+        # flake with homeConfigurations
+        flake = Path("flake.nix")
+        if flake.exists():
+            try:
+                text = flake.read_text()
+                if "homeConfigurations" in text or "home-manager" in text:
+                    return "flake.nix (homeConfigurations)"
+            except OSError:
+                pass
+        return None
+
+    def _rebuild_cmd(self):
+        if self.detect_style() == "flakes":
+            return "sudo nixos-rebuild switch --flake .#hostname"
+        return "sudo nixos-rebuild switch"
+
+    def _home_manager_cmd(self):
+        hm = self.detect_home_manager()
+        if not hm:
+            return None
+        if "flake" in hm:
+            return "home-manager switch --flake .#user@host"
+        return "home-manager switch"
+
+    def show_rebuild(self):
+        self._record("rebuild", "control")
+        cmd = self._rebuild_cmd()
+        style = self.detect_style()
+        print(f"Rebuild preview ({style})")
+        print()
+        print("Would run:")
+        print(f"  {cmd}")
+        print()
+        print("To see what would change (read-only):")
+        dry = cmd.replace("switch", "dry-build")
+        print(f"  {dry}")
+        print()
+        print("Preview never changes the system.")
+        # Optional short dry-build attempt if nixos-rebuild is available and no sudo needed for dry-build
+        if shutil.which("nixos-rebuild") and "sudo" not in dry:
+            print()
+            print("Trying dry-build (timeout 60s)...")
+            try:
+                r = subprocess.run(
+                    dry.split(), capture_output=True, text=True, timeout=60
+                )
+                out = (r.stdout or r.stderr or "").strip()
+                if out:
+                    print(out[:1200])
+                else:
+                    print("(no output)")
+            except (subprocess.TimeoutExpired, Exception):
+                print("(dry-build timed out or failed)")
+
+    def show_home(self):
+        self._record("home", "control")
+        hm_path = self.detect_home_manager()
+        cmd = self._home_manager_cmd()
+        if not hm_path:
+            print("No Home Manager config detected.")
+            print("Looked for:")
+            print("  ~/.config/home-manager/home.nix")
+            print("  home.nix")
+            print("  flake.nix containing homeConfigurations")
+            return
+        print("Home Manager preview")
+        print()
+        print(f"Detected: {hm_path}")
+        print()
+        print("Would run:")
+        print(f"  {cmd}")
+        print()
+        print("Preview never changes the system.")
 
     def add_note(self, text):
         with open(self.notes_file, "a") as f:
@@ -215,6 +305,12 @@ Default is docs-first. Model is optional.
             return
         if query.lower() == "uninstall":
             self.uninstall()
+            return
+        if query.lower() in ("rebuild", "rebuilds"):
+            self.show_rebuild()
+            return
+        if query.lower() in ("home", "home-manager", "homemanager"):
+            self.show_home()
             return
         query_type, subject = self.router.classify(query)
         if self._is_bare_package(query):
