@@ -52,10 +52,13 @@ Activate configuration changes:
   sudo nixos-rebuild switch
   sudo nixos-rebuild test
   sudo nixos-rebuild switch --rollback
+
+See changes first:
+  ainix rebuild
             """,
             tags=["nixos", "rebuild", "system"],
             related_topics=["nix-package-management", "generations"],
-            examples=["nixos-rebuild switch"]
+            examples=["nixos-rebuild switch", "ainix rebuild"]
         )
         self.add_entry(
             topic="flakes",
@@ -91,15 +94,37 @@ Or select an older generation at the boot menu.
             examples=["nixos-rebuild list-generations"]
         )
         self.add_entry(
+            topic="home-manager",
+            content="""
+Home Manager manages user config separately from the system.
+
+Standalone:
+  home-manager switch
+
+With a flake:
+  home-manager switch --flake .#user@host
+
+AINIX detects common locations:
+  ainix home
+            """,
+            tags=["home", "home-manager", "user"],
+            related_topics=["nixos-rebuild"],
+            examples=["home-manager switch", "ainix home"]
+        )
+        self.add_entry(
             topic="ainix-usage",
             content="""
 AINIX is a local NixOS assistant.
 Help, preview, and optional local model. Model is not required.
 Preview never changes the system.
+
+Useful:
+  ainix rebuild
+  ainix home
             """,
             tags=["ainix", "usage"],
             related_topics=[],
-            examples=["ainix help", "ainix start"]
+            examples=["ainix help", "ainix start", "ainix rebuild"]
         )
 
     def add_entry(self, topic, content, tags, related_topics, examples):
