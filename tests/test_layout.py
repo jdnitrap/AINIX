@@ -174,11 +174,15 @@ def test_explain_finds_the_file_this_machine_uses(tmp):
     _write(tmp / "roles" / "print.nix", "{ ... }: {\n  services.printing.enable = true;\n}\n")
     layout = detect(tmp)
     ssh = layout.explain("how do I enable ssh")
+    assert ssh.index("In plain words") < ssh.index("Exact answer")
+    assert "Edit " in ssh and "nixos-rebuild switch" in ssh
     assert str(tmp / "roles" / "remote.nix") in ssh
     assert "services.openssh.enable = false" in ssh
     assert "search.nixos.org/options" in ssh
     assert "services.openssh.enable" in ssh
     assert "print.nix" not in ssh
+    advanced = layout.explain("services.openssh.enable default")
+    assert advanced.index("Exact answer") < advanced.index("In plain words")
     printing = layout.explain("where is the printer")
     assert "print.nix" in printing
     assert "remote.nix" not in printing

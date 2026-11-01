@@ -19,6 +19,8 @@ _STOP = {
     "where", "when", "who", "can", "enable", "disable", "set", "use", "using",
     "this", "that", "your", "you", "nixos", "nix", "about", "from", "into",
     "please", "help", "show", "tell", "want", "need", "make", "turn",
+    "services", "programs", "networking", "environment", "hardware",
+    "boot", "security", "system", "default",
 }
 _SYNONYMS = {
     "ssh": ["openssh"],
@@ -153,19 +155,26 @@ class NixOSLayout:
                 break
         if not hits:
             return ""
-        blocks = ["On this machine"]
-        for path, number, stripped, _option in hits:
-            blocks.append(f"\n{path}:{number}\n  {stripped}")
         options = []
         for _path, _number, _stripped, option in hits:
             if option and option not in options:
                 options.append(option)
+        first_path, first_number, first_line, _first_option = hits[0]
+        plain = _plain_words(needles, first_path)
+        nxt = f"Next:\n  Edit {first_path}\n  {self.rebuild_command()}"
+        exact = ["Exact answer"]
+        for path, number, stripped, _option in hits:
+            exact.append(f"\n{path}:{number}\n  {stripped}")
         if options:
-            blocks.append("\nOne official page for each option. The manual, the wiki, and the forum all point here:")
+            exact.append("\nOfficial option page:")
             for option in options[:3]:
                 url = "https://search.nixos.org/options?channel=unstable&query=" + quote(option)
-                blocks.append(f"  {option}\n  {url}")
-        return "\n".join(blocks)
+                exact.append(f"  {option}\n  {url}")
+        exact_text = "\n".join(exact)
+        guide = f"In plain words\n{plain}\n\n{nxt}"
+        if _is_advanced(query):
+            return exact_text + "\n\n" + guide
+        return guide + "\n\n" + exact_text
 
     def excerpt_for(self, query: str) -> str:
         q = query.lower()
@@ -239,6 +248,36 @@ def _excerpt_packages(path: Path, limit: int = 40) -> str:
     if start + len(chunk) < len(text):
         note = "\n# excerpt truncated"
     return f"Excerpt of {path}:\n" + "\n".join(chunk) + note
+
+
+_PLAIN = {
+    "openssh": "SSH is a line in the NixOS configuration. The line below is what this machine does today. Change that line, then rebuild.",
+    "firewall": "The firewall is a line in the NixOS configuration. The line below is the current setting.",
+    "opensnitch": "OpenSnitch is configured in the NixOS files below. Change the file, then rebuild.",
+    "printing": "Printing is turned on in the NixOS configuration. The lines below are the current settings.",
+    "systempackages": "A permanent package is added to environment.systemPackages in the file below. Then the system is rebuilt. nix profile add affects only this user.",
+    "pipewire": "Sound is configured in the NixOS file below.",
+    "plasma": "The desktop is selected in the NixOS file below.",
+    "networkmanager": "Wi-Fi and wired connections are handled by NetworkManager, set in the file below.",
+    "flatpak": "Flatpak is enabled from the NixOS file below.",
+    "apparmor": "AppArmor is enabled from the NixOS file below.",
+    "adguard": "DNS filtering is configured in the NixOS file below.",
+}
+
+
+def _plain_words(needles: list, path: Path) -> str:
+    for needle in needles:
+        text = _PLAIN.get(needle.lower().replace("_", ""))
+        if text:
+            return text
+    return f"This setting lives in {path.name}. The line below is the current value. Edit that file, then rebuild."
+
+
+def _is_advanced(query: str) -> bool:
+    q = query.lower()
+    if re.search(r"\b[a-z_][\w-]*\.[a-z_][\w.-]*", q):
+        return True
+    return any(word in q for word in ("default", "mkoption", "module system", "source", "override", "type of"))
 
 
 def _needles(query: str) -> list:

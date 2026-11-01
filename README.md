@@ -2,7 +2,7 @@
 
 A local assistant for NixOS. It answers questions, shows safe command previews, and can generate small Nix snippets. Nothing changes your system unless you explicitly ask.
 
-Version 0.10.0.
+Version 0.11.0.
 
 ## What it does
 
@@ -87,7 +87,7 @@ Default is **docs-first**:
 
 When a local model does run, it receives this machine's config layout, a short excerpt of the package file when the question is about packages, and any docs already found. It is told not to invent options or paths.
 
-A help question also shows where that setting already lives in this machine's files, and one link on search.nixos.org. The manual, the wiki, and the forum are not all printed. A different machine, with a different layout, gets its own files.
+A help question answers two ways. A newcomer gets a short explanation and the next edit. An advanced question, one that names an option or asks for a default or a type, leads with the file, the line, and one search.nixos.org page. Both use the files on that machine.
 
 **Model-first** is optional. Set it once:
 

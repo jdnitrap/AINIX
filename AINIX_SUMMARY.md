@@ -1,6 +1,6 @@
 # AINIX summary
 
-Local NixOS assistant. Version 0.10.0.
+Local NixOS assistant. Version 0.11.0.
 
 - Help: local knowledge, Nix docs, optional web, optional local model
 - Control: preview by default (never runs commands); execute only with confirmation

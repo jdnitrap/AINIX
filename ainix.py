@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
