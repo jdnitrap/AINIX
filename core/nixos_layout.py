@@ -11,7 +11,44 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
+
+_STOP = {
+    "how", "do", "does", "did", "the", "and", "for", "with", "what", "why",
+    "where", "when", "who", "can", "enable", "disable", "set", "use", "using",
+    "this", "that", "your", "you", "nixos", "nix", "about", "from", "into",
+    "please", "help", "show", "tell", "want", "need", "make", "turn",
+}
+_SYNONYMS = {
+    "ssh": ["openssh"],
+    "firewall": ["firewall", "opensnitch"],
+    "printer": ["printing", "cups"],
+    "printing": ["printing", "cups"],
+    "scanner": ["sane", "ipp-usb"],
+    "scan": ["sane"],
+    "bluetooth": ["bluetooth", "blueman"],
+    "sound": ["pipewire", "pulseaudio"],
+    "audio": ["pipewire", "pulseaudio"],
+    "flatpak": ["flatpak"],
+    "update": ["autoupgrade"],
+    "upgrade": ["autoupgrade"],
+    "package": ["systempackages"],
+    "packages": ["systempackages"],
+    "install": ["systempackages"],
+    "apparmor": ["apparmor"],
+    "dns": ["adguard", "nameserver"],
+    "adblock": ["adguard"],
+    "vpn": ["openvpn", "wireguard"],
+    "desktop": ["plasma", "sddm"],
+    "plasma": ["plasma"],
+    "boot": ["boot.loader", "systemd-boot"],
+    "locale": ["i18n."],
+    "keyboard": ["xkb"],
+    "wifi": ["networkmanager"],
+    "network": ["networkmanager"],
+}
+_OPTION_NAME = re.compile(r"\b([A-Za-z_][\w-]*(?:\.[A-Za-z_][\w-]*)+)\b")
 
 _PACKAGE_NAME = re.compile(r"^[A-Za-z_][\w.+-]*$")
 _HOST_NAME = re.compile(r'networking\.hostName\s*=\s*"([^"]+)"')
@@ -77,10 +114,58 @@ class NixOSLayout:
         excerpt = self.excerpt_for(query)
         if excerpt:
             parts.append(excerpt)
+        located = self.explain(query)
+        if located:
+            parts.append(located)
         prior = (prior or "").strip()
         if prior:
             parts.append("Material already found:\n" + prior[:1500])
         return "\n\n".join(parts)
+
+    def explain(self, query: str) -> str:
+        """Where a question shows up in this machine's config, plus one official link.
+
+        NixOS documents the same option in the manual, the wiki, and search.
+        The paths here are whatever files this machine actually uses.
+        """
+        if self.root is None or self.style == "unknown":
+            return ""
+        needles = _needles(query)
+        if not needles:
+            return ""
+        hits = []
+        for path in _nix_files(self.root):
+            try:
+                lines = path.read_text(errors="ignore").splitlines()
+            except OSError:
+                continue
+            for number, line in enumerate(lines, start=1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if not _line_matches(stripped, needles):
+                    continue
+                option = _option_name(stripped)
+                hits.append((path, number, stripped, option))
+                if len(hits) >= 8:
+                    break
+            if len(hits) >= 8:
+                break
+        if not hits:
+            return ""
+        blocks = ["On this machine"]
+        for path, number, stripped, _option in hits:
+            blocks.append(f"\n{path}:{number}\n  {stripped}")
+        options = []
+        for _path, _number, _stripped, option in hits:
+            if option and option not in options:
+                options.append(option)
+        if options:
+            blocks.append("\nOne official page for each option. The manual, the wiki, and the forum all point here:")
+            for option in options[:3]:
+                url = "https://search.nixos.org/options?channel=unstable&query=" + quote(option)
+                blocks.append(f"  {option}\n  {url}")
+        return "\n".join(blocks)
 
     def excerpt_for(self, query: str) -> str:
         q = query.lower()
@@ -154,6 +239,48 @@ def _excerpt_packages(path: Path, limit: int = 40) -> str:
     if start + len(chunk) < len(text):
         note = "\n# excerpt truncated"
     return f"Excerpt of {path}:\n" + "\n".join(chunk) + note
+
+
+def _needles(query: str) -> list:
+    words = re.findall(r"[a-z0-9]+", query.lower())
+    needles = []
+    for word in words:
+        if word in _STOP or len(word) < 3:
+            continue
+        needles.append(word)
+        needles.extend(_SYNONYMS.get(word, []))
+    unique = []
+    for needle in needles:
+        if needle not in unique:
+            unique.append(needle)
+    return unique
+
+
+def _line_matches(stripped: str, needles: list) -> bool:
+    if "=" not in stripped:
+        return False
+    lhs = stripped.split("=", 1)[0].split('"')[0].split("'")[0]
+    segments = [part.lower().replace("_", "") for part in re.findall(r"[A-Za-z_][\w-]*", lhs)]
+    if not segments:
+        return False
+    looking_for_packages = any(needle == "systempackages" for needle in needles)
+    if looking_for_packages:
+        return "systempackages" in segments
+    if "." not in lhs:
+        return False
+    for needle in needles:
+        name = needle.lower().replace("_", "")
+        if name in segments:
+            return True
+        if len(name) >= 6 and any(name in segment for segment in segments):
+            return True
+    return False
+
+
+def _option_name(stripped: str) -> str:
+    lhs = stripped.split("=", 1)[0].split('"')[0].split("'")[0]
+    match = _OPTION_NAME.search(lhs)
+    return match.group(1) if match else ""
 
 
 def valid_package_name(name: str) -> bool:

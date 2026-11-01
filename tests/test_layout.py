@@ -168,6 +168,23 @@ def test_model_context_uses_this_machine(tmp):
     print("✓ model context is this machine and stays short")
 
 
+def test_explain_finds_the_file_this_machine_uses(tmp):
+    _write(tmp / "configuration.nix", "{ ... }: { imports = [ ./roles/remote.nix ./roles/print.nix ]; }")
+    _write(tmp / "roles" / "remote.nix", "{ ... }: {\n  services.openssh.enable = false;\n}\n")
+    _write(tmp / "roles" / "print.nix", "{ ... }: {\n  services.printing.enable = true;\n}\n")
+    layout = detect(tmp)
+    ssh = layout.explain("how do I enable ssh")
+    assert str(tmp / "roles" / "remote.nix") in ssh
+    assert "services.openssh.enable = false" in ssh
+    assert "search.nixos.org/options" in ssh
+    assert "services.openssh.enable" in ssh
+    assert "print.nix" not in ssh
+    printing = layout.explain("where is the printer")
+    assert "print.nix" in printing
+    assert "remote.nix" not in printing
+    print("✓ explain follows this machine's files")
+
+
 def test_package_name():
     assert valid_package_name("firefox")
     assert valid_package_name("kdePackages.kate")
@@ -188,6 +205,7 @@ def run_all_tests():
         test_flake_lists_names_when_ambiguous,
         test_main_package_list_comes_first,
         test_model_context_uses_this_machine,
+        test_explain_finds_the_file_this_machine_uses,
     ]
     for case in cases:
         with tempfile.TemporaryDirectory() as directory:

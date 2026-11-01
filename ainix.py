@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -288,9 +288,13 @@ Default is docs-first. Model is optional.
             got, prior = show_docs_and_web()
             if not got:
                 show_model(self._model_context(search_term, prior))
-        note = self._machine_note(search_term)
-        if note:
-            print(note)
+        located = detect().explain(search_term)
+        if located:
+            print("\n" + located)
+        else:
+            note = self._machine_note(search_term)
+            if note:
+                print(note)
 
     def _model_context(self, query, prior):
         return detect().model_context(query, prior)
