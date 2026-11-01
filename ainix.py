@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -250,8 +250,8 @@ Default is docs-first. Model is optional.
             mode = "model-first" if self.model_first else "docs-first"
             print(f"[{mode}]")
 
-        def show_model():
-            out = self.knowledge.ollama_fallback(search_term)
+        def show_model(context):
+            out = self.knowledge.ollama_fallback(search_term, context)
             if out:
                 print("\n--- local model ---")
                 print(out)
@@ -259,32 +259,41 @@ Default is docs-first. Model is optional.
             return False
 
         def show_docs_and_web():
+            chunks = []
             results = self.knowledge.search(search_term)
-            if results and not self.raw:
-                print(results[0].content.strip())
+            if results:
+                text = results[0].content.strip()
+                chunks.append(text)
+                if not self.raw:
+                    print(text)
             docs = self.knowledge.lookup_docs(search_term)
             if docs and "No matching" not in docs:
                 print("\n--- Nix docs ---")
                 print(docs)
-                return True
+                chunks.append(docs)
+                return True, "\n\n".join(chunks)
             web = self.knowledge.web_search(search_term)
             if web:
                 print("\n--- web ---")
                 print(web)
-                return True
-            return bool(results)
+                chunks.append(web)
+                return True, "\n\n".join(chunks)
+            return bool(results), "\n\n".join(chunks)
 
         if self.model_first:
-            got = show_model()
+            got = show_model(self._model_context(search_term, ""))
             if not got:
                 show_docs_and_web()
         else:
-            got = show_docs_and_web()
+            got, prior = show_docs_and_web()
             if not got:
-                show_model()
+                show_model(self._model_context(search_term, prior))
         note = self._machine_note(search_term)
         if note:
             print(note)
+
+    def _model_context(self, query, prior):
+        return detect().model_context(query, prior)
 
     def _machine_note(self, query):
         q = query.lower()

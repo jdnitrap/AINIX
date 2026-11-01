@@ -57,6 +57,39 @@ class NixOSLayout:
             return "unknown (no /etc/nixos config found)"
         return self.style
 
+    def model_context(self, query: str, prior: str = "") -> str:
+        """Facts the local model may use. It does not replace the docs."""
+        lines = ["This machine:"]
+        lines.append(f"style: {self.style}")
+        if self.root:
+            lines.append(f"config: {self.root}")
+        if self.host_name:
+            lines.append(f"host: {self.host_name}")
+        if self.packages_files:
+            lines.append(f"packages file: {self.packages_files[0]}")
+            if len(self.packages_files) > 1:
+                lines.append("packages also assigned in: " + ", ".join(str(p) for p in self.packages_files[1:]))
+        lines.append(f"rebuild: {self.rebuild_command()}")
+        if self.note:
+            lines.append(self.note)
+        lines.append("Use these paths. Do not invent a different config file or NixOS option.")
+        parts = ["\n".join(lines)]
+        excerpt = self.excerpt_for(query)
+        if excerpt:
+            parts.append(excerpt)
+        prior = (prior or "").strip()
+        if prior:
+            parts.append("Material already found:\n" + prior[:1500])
+        return "\n\n".join(parts)
+
+    def excerpt_for(self, query: str) -> str:
+        q = query.lower()
+        if not self.packages_files:
+            return ""
+        if not any(word in q for word in ("install", "package", "systempackages")):
+            return ""
+        return _excerpt_packages(self.packages_files[0])
+
     def install_preview(self, package: str) -> list:
         main = self.packages_files[0] if self.packages_files else self.packages_label()
         lines = [
@@ -94,6 +127,33 @@ class NixOSLayout:
             f"  nix profile add nixpkgs#{package}",
         ])
         return lines
+
+
+def _excerpt_packages(path: Path, limit: int = 40) -> str:
+    try:
+        text = path.read_text(errors="ignore").splitlines()
+    except OSError:
+        return ""
+    start = None
+    for index, line in enumerate(text):
+        if "environment.systemPackages" in line and "=" in line:
+            start = index
+            break
+    if start is None:
+        return ""
+    chunk = []
+    depth = 0
+    for line in text[start:]:
+        if re.search(r"password|secret|token", line, re.I):
+            continue
+        chunk.append(line)
+        depth += line.count("[") + line.count("{") - line.count("]") - line.count("}")
+        if len(chunk) >= limit or (len(chunk) > 1 and depth <= 0):
+            break
+    note = ""
+    if start + len(chunk) < len(text):
+        note = "\n# excerpt truncated"
+    return f"Excerpt of {path}:\n" + "\n".join(chunk) + note
 
 
 def valid_package_name(name: str) -> bool:

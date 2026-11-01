@@ -146,6 +146,28 @@ def test_main_package_list_comes_first(tmp):
     print("✓ main package list is listed first")
 
 
+def test_model_context_uses_this_machine(tmp):
+    _write(tmp / "configuration.nix", "{ ... }: { imports = [ ./packages.nix ]; networking.hostName = \"desk\"; }")
+    body = "\n".join(
+        ["{ pkgs, ... }: {", "  environment.systemPackages = with pkgs; ["]
+        + [f"    pkg{i}" for i in range(50)]
+        + ["  ];", "}"]
+    )
+    _write(tmp / "packages.nix", body + "\n  hashedPassword = \"secret-value\";\n")
+    layout = detect(tmp)
+    context = layout.model_context("how do I install a package?", "nix search said hello")
+    assert f"config: {tmp}" in context
+    assert "style: channels" in context
+    assert "sudo nixos-rebuild switch" in context
+    assert "packages.nix" in context
+    assert "environment.systemPackages" in context
+    assert "excerpt truncated" in context
+    assert "secret-value" not in context
+    assert "nix search said hello" in context
+    assert layout.excerpt_for("what is a generation") == ""
+    print("✓ model context is this machine and stays short")
+
+
 def test_package_name():
     assert valid_package_name("firefox")
     assert valid_package_name("kdePackages.kate")
@@ -165,6 +187,7 @@ def run_all_tests():
         test_flake_matches_hostname,
         test_flake_lists_names_when_ambiguous,
         test_main_package_list_comes_first,
+        test_model_context_uses_this_machine,
     ]
     for case in cases:
         with tempfile.TemporaryDirectory() as directory:

@@ -267,15 +267,12 @@ Useful:
                     return m
         return models[0]
 
-    def ollama_fallback(self, query: str) -> Optional[str]:
+    def ollama_fallback(self, query: str, context: str = "") -> Optional[str]:
         """Optional local model. No GPU assumptions. Returns None if unavailable."""
         model = self.pick_model()
         if not model or not shutil.which("ollama"):
             return None
-        prompt = (
-            "You are a NixOS assistant. Answer briefly. "
-            "Do not invent options. If unsure, say so.\n\nQuestion: " + query
-        )
+        prompt = build_model_prompt(query, context)
         try:
             r = subprocess.run(
                 ["ollama", "run", model, prompt],
@@ -286,3 +283,18 @@ Useful:
         except (subprocess.TimeoutExpired, Exception):
             return None
         return None
+
+
+def build_model_prompt(query: str, context: str = "") -> str:
+    """Prompt for the local model. Context is facts already gathered on this machine."""
+    parts = [
+        "You are a local NixOS assistant. Answer briefly.",
+        "Use only the machine facts and material below.",
+        "Do not invent NixOS options, file paths, or package names.",
+        "If the material does not answer the question, say so.",
+        "Do not tell the user you changed any file.",
+    ]
+    if context.strip():
+        parts.append("\n" + context.strip())
+    parts.append("\nQuestion: " + query)
+    return "\n".join(parts)

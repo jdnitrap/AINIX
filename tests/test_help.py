@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from help.knowledge_base import HelpKnowledgeBase
+from help.knowledge_base import HelpKnowledgeBase, build_model_prompt
 
 
 def test_knowledge_search():
@@ -41,6 +41,15 @@ def test_list_topics():
     print(f"✓ Topics: {topics}")
 
 
+def test_model_prompt_includes_context():
+    prompt = build_model_prompt("How do I enable ssh?", "config: /etc/nixos\nrebuild: sudo nixos-rebuild switch")
+    assert "Do not invent NixOS options" in prompt
+    assert "/etc/nixos" in prompt
+    assert "How do I enable ssh?" in prompt
+    assert "changed any file" in prompt
+    print("✓ model prompt carries machine context")
+
+
 def run_all_tests():
     print("Running AINIX Help Knowledge Base Tests")
     print("=" * 50)
@@ -49,6 +58,8 @@ def run_all_tests():
     test_knowledge_retrieval()
     print()
     test_list_topics()
+    print()
+    test_model_prompt_includes_context()
     print()
     print("=" * 50)
     print("✅ All help knowledge base tests passed!")
