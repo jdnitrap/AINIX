@@ -2,7 +2,7 @@
 
 A local assistant for NixOS. It answers questions, shows safe command previews, and can generate small Nix snippets. Nothing changes your system unless you explicitly ask.
 
-Version 0.7.0.
+Version 0.8.0.
 
 ## What it does
 
@@ -13,6 +13,8 @@ Version 0.7.0.
 - **Start** — a short first-steps guide for new NixOS users
 
 It does not edit your config files. A model is optional. It works without one.
+
+`ainix install` and `ainix rebuild` read the NixOS config on the machine. That is `/etc/nixos`, or the directory in `AINIX_NIXOS_CONFIG`. A single `configuration.nix`, a module tree, and a flake each get the matching file path and rebuild command. A `flake.nix` in the current directory is not treated as the system.
 
 ## Install
 

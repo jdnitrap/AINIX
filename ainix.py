@@ -11,11 +11,12 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.router import QueryRouter, QueryType
+from core.nixos_layout import detect, valid_package_name
 from control.executor import SafeExecutor, ExecutionMode
 from help.knowledge_base import HelpKnowledgeBase
 
@@ -54,17 +55,20 @@ class AINIX:
         self.cache_dir = self.data_dir / "cache"
 
     def show_start(self):
-        style = self.detect_style()
-        rebuild = self._rebuild_cmd()
+        layout = detect()
+        rebuild = layout.rebuild_command()
         hm = self._home_manager_cmd()
         extra = f"\n5. Home Manager (if present)\n   {hm}\n" if hm else ""
+        host = f", host {layout.host_name}" if layout.host_name else ""
         print(f"""AINIX start — first steps on NixOS
 
-Your system looks like: {style}
+Your system looks like: {layout.style_label()}{host}
+Config: {layout.root or "not found"}
+Packages: {layout.packages_label()}
 
 1. Install a package (permanent)
-   Add to configuration.nix:
-     environment.systemPackages = with pkgs; [ firefox ];
+   Add it to environment.systemPackages in:
+     {layout.packages_label()}
    Then:
      {rebuild}
 
@@ -170,9 +174,7 @@ Default is docs-first. Model is optional.
         return None
 
     def _rebuild_cmd(self):
-        if self.detect_style() == "flakes":
-            return "sudo nixos-rebuild switch --flake .#hostname"
-        return "sudo nixos-rebuild switch"
+        return detect().rebuild_command()
 
     def _home_manager_cmd(self):
         hm = self.detect_home_manager()
@@ -184,20 +186,24 @@ Default is docs-first. Model is optional.
 
     def show_rebuild(self):
         self._record("rebuild", "control")
-        cmd = self._rebuild_cmd()
-        style = self.detect_style()
-        print(f"Rebuild preview ({style})")
+        layout = detect()
+        cmd = layout.rebuild_command()
+        dry = layout.dry_build_command()
+        print(f"Rebuild preview ({layout.style_label()})")
+        if layout.root:
+            print(f"Config: {layout.root}")
         print()
         print("Would run:")
         print(f"  {cmd}")
+        if layout.note:
+            print()
+            print(layout.note)
         print()
         print("To see what would change (read-only):")
-        dry = cmd.replace("switch", "dry-build")
         print(f"  {dry}")
         print()
         print("Preview never changes the system.")
-        # Optional short dry-build attempt if nixos-rebuild is available and no sudo needed for dry-build
-        if shutil.which("nixos-rebuild") and "sudo" not in dry:
+        if shutil.which("nixos-rebuild") and not dry.startswith("sudo") and "<name>" not in dry:
             print()
             print("Trying dry-build (timeout 60s)...")
             try:
@@ -276,10 +282,34 @@ Default is docs-first. Model is optional.
             got = show_docs_and_web()
             if not got:
                 show_model()
+        note = self._machine_note(search_term)
+        if note:
+            print(note)
+
+    def _machine_note(self, query):
+        q = query.lower()
+        if not any(word in q for word in ("install", "package", "systempackages", "rebuild", "flake")):
+            return ""
+        layout = detect()
+        if layout.style == "unknown":
+            return ""
+        return (
+            "\nOn this machine:\n"
+            f"  packages: {layout.packages_label()}\n"
+            f"  rebuild:  {layout.rebuild_command()}\n"
+        )
 
     def handle_control_query(self, query, subject=None, explain=False,
                              dry_run=False, execute=False, yes=False):
         self._record(query, "control")
+        parts = query.split()
+        if parts and parts[0].lower() in ("install", "add") and len(parts) >= 2:
+            package = parts[1]
+            if not valid_package_name(package):
+                print(f"Not a package name: {package}")
+                return
+            print("\n".join(detect().install_preview(package)))
+            return
         mode = ExecutionMode.EXECUTE if execute else ExecutionMode.PREVIEW
         if mode == ExecutionMode.EXECUTE and not yes:
             ans = input(f"Run {query}? [y/N] ").strip().lower()

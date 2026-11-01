@@ -1,4 +1,4 @@
-.TH AINIX 1 "October 2026" "AINIX 0.7" "User Commands"
+.TH AINIX 1 "November 2026" "AINIX 0.8" "User Commands"
 .SH NAME
 ainix \- local NixOS assistant
 .SH SYNOPSIS
@@ -13,7 +13,10 @@ Preview is the default for control. Nothing runs unless you pass
 \fB--execute\fR.
 .PP
 .B ainix rebuild
-shows the flake-aware or channels rebuild command and a dry-build line.
+shows the rebuild command for this machine and a dry-build line.
+The config is read from /etc/nixos, or from AINIX_NIXOS_CONFIG.
+.B ainix install
+names the file that sets environment.systemPackages.
 .PP
 .B ainix home
 shows a Home Manager switch command if a config is detected.
