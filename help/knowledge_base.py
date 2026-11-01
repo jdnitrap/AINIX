@@ -114,13 +114,20 @@ AINIX detects common locations:
         self.add_entry(
             topic="ainix-usage",
             content="""
-AINIX is a local NixOS assistant.
-Help, preview, and optional local model. Model is not required.
-Preview never changes the system.
+AINIX is a local NixOS assistant. Version answers come from this machine.
+
+A question is docs-first: built-in notes, then nixos-option or nix search, then DuckDuckGo if Nix found nothing, then Ollama only if those miss. After that, AINIX reads /etc/nixos (or AINIX_NIXOS_CONFIG).
+
+A how-to prints plain words, the file to edit, and the rebuild command, then the current line and one search.nixos.org link. A question that names an option leads with the line and the link.
+
+ainix install and ainix rebuild only read the local config and print a preview. They do not search the web and they do not edit files.
 
 Useful:
+  ainix "How do I enable ssh?"
+  ainix install firefox
   ainix rebuild
-  ainix home
+  ainix help
+  man ainix
             """,
             tags=["ainix", "usage"],
             related_topics=[],

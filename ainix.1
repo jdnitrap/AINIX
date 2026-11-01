@@ -5,25 +5,69 @@ ainix \- local NixOS assistant
 .B ainix
 [\,OPTIONS\/] [\,QUERY\/]
 .SH DESCRIPTION
-AINIX is a local assistant for NixOS. It answers from a small knowledge
-base, real Nix tools, optional web search, and an optional local model.
+AINIX answers NixOS questions from the files on this machine.
+A newcomer gets plain words and the next edit.
+An advanced user who names an option gets the file, the current line, and one official page.
 .PP
-Default help order is docs-first. Model-first is optional.
-Preview is the default for control. Nothing runs unless you pass
-\fB--execute\fR.
+A question is docs-first:
+.IP 1 3
+Built-in notes for packages, rebuilds, flakes, generations, and Home Manager.
+.IP 2 3
+Nix on this computer.
+A dotted option is passed to
+.BR nixos-option .
+Other questions go to
+.BR "nix search nixpkgs" .
+Results are cached under
+.IR ~/.local/share/ainix/ .
+.IP 3 3
+DuckDuckGo HTML search, with
+.I nixos
+added to the query, only if Nix found nothing and the machine is online.
+.IP 4 3
+Ollama, only if the three steps above miss.
+The prompt includes this machine's layout, a short package-file excerpt when the question is about packages, the file hits, and any text already found.
+The model is told not to invent options or paths.
 .PP
-.B ainix rebuild
-shows the rebuild command for this machine and a dry-build line.
-The config is read from /etc/nixos, or from AINIX_NIXOS_CONFIG.
+AINIX then reads
+.I /etc/nixos ,
+or the directory in
+.BR AINIX_NIXOS_CONFIG .
+A
+.I flake.nix
+in the current directory is ignored.
+.PP
+A how-to prints plain words, the file to edit, and the rebuild command, then the matching line and one
+.I search.nixos.org
+link.
+A question that names an option, or asks for a default or a type, leads with the line and that link.
+The search page is printed and is not downloaded.
+.PP
 .B ainix install
-names the file that sets environment.systemPackages.
+and
+.B ainix rebuild
+do not search the web.
+They read the local config and print a preview.
+.B install
+names the file that assigns
+.IR environment.systemPackages .
+.B rebuild
+prints
+.I sudo nixos-rebuild switch
+on a channels system, or
+.I sudo nixos-rebuild switch --flake <dir>#<name>
+on a flake.
 .PP
 .B ainix home
 shows a Home Manager switch command if a config is detected.
+.PP
+Nothing is edited.
+Nothing runs unless you pass
+.BR \-\-execute .
 .SH OPTIONS
 .TP
 .B help
-Show usage.
+Show this usage summary.
 .TP
 .B \-\-version
 Print version.
@@ -35,35 +79,49 @@ Recent queries.
 Save a note.
 .TP
 .B \-\-cache-clear
-Clear doc cache.
+Clear the Nix doc cache.
 .TP
 .B uninstall
 Remove the curl-installed files.
 .TP
 .B \-\-model NAME
-Ollama model to use (optional).
+Ollama model to use.
+Optional.
 .TP
 .B \-\-model-first
-Ask the local model first.
+Ask the local model before the docs.
 .TP
 .B \-\-docs-first
-Docs and web first (default).
+Docs, Nix, and the web before the model.
+This is the default.
 .TP
 .B \-\-execute, \-x
-Run a control command (asks unless \fB--yes\fR).
+Run a control command.
+Asks unless
+.B \-\-yes
+is set.
 .TP
 .B \-\-yes, \-y
-Skip confirm on execute.
+Skip the confirm prompt on execute.
+.SH ENVIRONMENT
+.TP
+.B AINIX_NIXOS_CONFIG
+Directory that holds the NixOS config.
+The default is
+.IR /etc/nixos .
 .SH FILES
 .TP
 .I ~/.config/ainix/config.json
-Optional: {"model": "gemma2:9b", "model_first": true}
+Optional settings, for example
+.IR '{"model": "gemma2:9b", "model_first": true}' .
 .TP
 .I ~/.local/share/ainix/
-History, notes, cache.
+History, notes, and the doc cache.
 .SH NOTES
-Model is optional and hardware-agnostic. No NVIDIA/AMD assumptions.
-AINIX does not edit your config files.
+The model is optional.
+Ollama is the local model and makes no NVIDIA or AMD assumption.
+AINIX does not edit config files.
 .SH SEE ALSO
 .BR nix (1),
-.BR nixos-rebuild (8)
+.BR nixos-rebuild (8),
+.BR nixos-option (8)

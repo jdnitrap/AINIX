@@ -98,15 +98,29 @@ Preview never changes the system. Nothing runs unless you pass --execute.
 Mode:  {mode}
 Model: {model}
 
-New here?  ainix start
+A question is answered docs-first:
+  1. Built-in notes
+  2. nixos-option or nix search
+  3. DuckDuckGo, if Nix found nothing
+  4. Ollama, only if those miss
 
-Or:
-  ainix --model-first "question"
-  ainix --docs-first "question"
+Then this machine's Nix files are read from /etc/nixos,
+or from AINIX_NIXOS_CONFIG. A how-to prints plain words,
+the file to edit, and the rebuild command, then the line
+and one search.nixos.org link. A question that names an
+option leads with that line and link.
+
+Commands only preview. They do not search the web.
+  ainix install firefox
   ainix rebuild
   ainix home
+  ainix start
 
-Default is docs-first. Model is optional.
+  ainix --docs-first "How do I enable ssh?"
+  ainix --model-first "How do I enable ssh?"
+  man ainix
+
+Nothing is edited. Nothing runs unless you pass --execute.
 """)
 
     def uninstall(self):
@@ -390,7 +404,9 @@ Default is docs-first. Model is optional.
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AINIX")
+    parser = argparse.ArgumentParser(
+        description="Local NixOS assistant. Questions are docs-first, then this machine's Nix files. Commands preview and do not edit the config.",
+    )
     parser.add_argument("query", nargs="*")
     parser.add_argument("--execute", "-x", action="store_true")
     parser.add_argument("--yes", "-y", action="store_true")
