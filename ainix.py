@@ -9,7 +9,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 VERSION = "0.11.0"
 
@@ -92,35 +92,24 @@ Preview never changes the system. Nothing runs unless you pass --execute.
 """)
 
     def show_help(self):
-        model = self.knowledge.pick_model() or "none"
-        mode = "model-first" if self.model_first else "docs-first"
         print(f"""AINIX {VERSION}
-Mode:  {mode}
-Model: {model}
 
-A question is answered docs-first:
-  1. Built-in notes
-  2. nixos-option or nix search
-  3. DuckDuckGo, if Nix found nothing
-  4. Ollama, only if those miss
+A question asks your files, the manuals, nixpkgs at your
+revision, the wiki, Discourse, GitHub, and DuckDuckGo
+together. The answer cites the pieces that fit and prints
+a preview. YouTube is included for a learning question.
 
-Then this machine's Nix files are read from /etc/nixos,
-or from AINIX_NIXOS_CONFIG. A how-to prints plain words,
-the file to edit, and the rebuild command, then the line
-and one search.nixos.org link. A question that names an
-option leads with that line and link.
+  ainix "How do I enable ssh?"
 
 Commands only preview. They do not search the web.
   ainix install firefox
   ainix rebuild
   ainix home
   ainix start
+  ainix packages
+  ainix packages --branch unstable --refresh
 
-  ainix --docs-first "How do I enable ssh?"
-  ainix --model-first "How do I enable ssh?"
-  man ainix
-
-Nothing is edited. Nothing runs unless you pass --execute.
+Nothing is edited. Nothing is built.
 """)
 
     def uninstall(self):
@@ -146,7 +135,7 @@ Nothing is edited. Nothing runs unless you pass --execute.
             print("no cache")
 
     def _record(self, query, kind):
-        entry = {"time": datetime.utcnow().isoformat() + "Z", "query": query, "kind": kind}
+        entry = {"time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "query": query, "kind": kind}
         with open(self.history_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
@@ -258,73 +247,32 @@ Nothing is edited. Nothing runs unless you pass --execute.
         print(f"Noted: {text.strip()}")
 
     def handle_help_query(self, query, subject=None):
-        search_term = subject or query
-        self._record(search_term, "help")
-        if not self.raw:
-            mode = "model-first" if self.model_first else "docs-first"
-            print(f"[{mode}]")
+        self._record(query, "help")
+        try:
+            from ainix_help.install_edit import install_question
 
-        def show_model(context):
-            out = self.knowledge.ollama_fallback(search_term, context)
-            if out:
-                print("\n--- local model ---")
-                print(out)
-                return True
-            return False
-
-        def show_docs_and_web():
-            chunks = []
-            results = self.knowledge.search(search_term)
-            if results:
-                text = results[0].content.strip()
-                chunks.append(text)
-                if not self.raw:
-                    print(text)
-            docs = self.knowledge.lookup_docs(search_term)
-            if docs and "No matching" not in docs:
-                print("\n--- Nix docs ---")
-                print(docs)
-                chunks.append(docs)
-                return True, "\n\n".join(chunks)
-            web = self.knowledge.web_search(search_term)
-            if web:
-                print("\n--- web ---")
-                print(web)
-                chunks.append(web)
-                return True, "\n\n".join(chunks)
-            return bool(results), "\n\n".join(chunks)
-
+            planned = install_question(query, "")
+        except ImportError:
+            planned = None
+        if planned is not None:
+            sys.stdout.write(str(planned))
+            sys.stdout.write("\n")
+            return
+        try:
+            from ainix_help.assemble import assemble
+            from ainix_help.context import Context
+            from ainix_help.search import search
+        except ImportError:
+            print("The search helper is not on PYTHONPATH.")
+            print("From the AINIX checkout run: nix-shell")
+            print('Then: ainix "your question"')
+            return
         if self.model_first:
-            got = show_model(self._model_context(search_term, ""))
-            if not got:
-                show_docs_and_web()
-        else:
-            got, prior = show_docs_and_web()
-            if not got:
-                show_model(self._model_context(search_term, prior))
-        located = detect().explain(search_term)
-        if located:
-            print("\n" + located)
-        else:
-            note = self._machine_note(search_term)
-            if note:
-                print(note)
-
-    def _model_context(self, query, prior):
-        return detect().model_context(query, prior)
-
-    def _machine_note(self, query):
-        q = query.lower()
-        if not any(word in q for word in ("install", "package", "systempackages", "rebuild", "flake")):
-            return ""
-        layout = detect()
-        if layout.style == "unknown":
-            return ""
-        return (
-            "\nOn this machine:\n"
-            f"  packages: {layout.packages_label()}\n"
-            f"  rebuild:  {layout.rebuild_command()}\n"
-        )
+            print("The model is not asked. This answer is the sources below.")
+        ctx = Context(query.strip())
+        hits, notes, names = search(ctx)
+        sys.stdout.write(assemble(ctx, hits, notes, names))
+        sys.stdout.write("\n")
 
     def handle_control_query(self, query, subject=None, explain=False,
                              dry_run=False, execute=False, yes=False):
@@ -369,6 +317,14 @@ Nothing is edited. Nothing runs unless you pass --execute.
         if query.lower() in ("home", "home-manager", "homemanager"):
             self.show_home()
             return
+        parts = query.split()
+        if parts and parts[0].lower() == "packages":
+            from ainix_catalog.cli import run as packages_run
+            try:
+                packages_run(parts[1:])
+            except SystemExit:
+                return
+            return
         query_type, subject = self.router.classify(query)
         if self._is_bare_package(query):
             query = f"install {query}"
@@ -405,7 +361,7 @@ Nothing is edited. Nothing runs unless you pass --execute.
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Local NixOS assistant. Questions are docs-first, then this machine's Nix files. Commands preview and do not edit the config.",
+        description="Local NixOS assistant. A question searches the sources together. Commands preview and do not edit the config.",
     )
     parser.add_argument("query", nargs="*")
     parser.add_argument("--execute", "-x", action="store_true")

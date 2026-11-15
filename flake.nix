@@ -2,12 +2,14 @@
   description = "AINIX - AI-Native NixOS Integration (Help + Control assistant)";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # NixOS 26.05. flake.lock pins the revision so every install gets the same
+    # Python 3.13.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" ] (system:
       let
         pkgs = import nixpkgs { inherit system; };
       in {
@@ -18,6 +20,13 @@
           type = "app";
           program = "${self.packages.${system}.default}/bin/ainix";
         };
+        apps.desktop = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/ainix-desktop";
+        };
+
+        devShells.default = import ./shell.nix { inherit pkgs; };
+        devShells.gui = import ./gui-shell.nix { inherit pkgs; };
       }
     ) // {
       nixosModules.default = import ./ainix-nixos-module.nix;

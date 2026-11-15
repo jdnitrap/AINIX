@@ -52,8 +52,14 @@ class QueryRouter:
         if QueryRouter.QUESTION_PATTERN.search(query):
             return QueryType.HELP, None
 
+        # A pasted build log contains words such as "rebuild" and is still a question.
+        if re.search(r"\berror:|\btraceback\b|\bundefined variable\b|\binfinite recursion\b", query_lower):
+            return QueryType.HELP, None
+
         # Extract first meaningful word
         words = re.findall(r'\b\w+\b', query_lower)
+        if len(words) > 4 and any(word in words for word in ("failed", "failure", "traceback")):
+            return QueryType.HELP, None
         if not words:
             return QueryType.UNKNOWN, None
 

@@ -72,6 +72,18 @@ def test_container_extraction():
         print(f"✓ Container extraction: {query} → {container}")
 
 
+def test_error_log_is_help():
+    """A pasted rebuild error is a question. A rebuild command stays a command."""
+    log = "error: attribute 'foobarpkg' missing. The nixos rebuild failed"
+    query_type, _subject = QueryRouter.classify(log)
+    assert query_type == QueryType.HELP, query_type
+    query_type, _subject = QueryRouter.classify("rebuild the system")
+    assert query_type == QueryType.CONTROL, query_type
+    query_type, _subject = QueryRouter.classify("install firefox")
+    assert query_type == QueryType.CONTROL, query_type
+    print("✓ error log is help, commands stay commands")
+
+
 def test_dangerous_operation_detection():
     """Test detection of dangerous operations."""
     dangerous_queries = [
@@ -113,6 +125,9 @@ def run_all_tests():
     print()
 
     test_container_extraction()
+    print()
+
+    test_error_log_is_help()
     print()
 
     test_dangerous_operation_detection()

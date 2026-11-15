@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Runs only with the checkout and the nix-shell python on PATH.
+root="${AINIX_ROOT:-}"
+if [ -z "$root" ]; then
+  root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+fi
+if [ ! -f "$root/ainix.py" ] || [ ! -d "$root/ainix_help" ]; then
+  echo "ainix: cannot find the checkout. Run nix-shell from the AINIX directory." >&2
+  exit 1
+fi
+export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$root/ainix.py" "$@"
