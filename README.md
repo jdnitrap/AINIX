@@ -1,138 +1,114 @@
 # AINIX
 
-A local assistant for NixOS. It helps a newcomer find the one file and the next edit, and it gives an advanced user the option name, the current line, and one official page.
+AINIX is a local helper for NixOS. Ask a question in ordinary language, and it looks through your configuration and the NixOS sources, then shows the line that fits. You can try it without installing anything else.
 
-Version 0.11.0.
+It is for a first NixOS setup and for someone who already knows the option names. A newcomer gets plain words and the next edit. Someone who names an option gets the file, the current line, and a source.
 
-It does not edit your config. A model is optional. It works without one.
+Version 0.11.0. It runs on `x86_64-linux` and `aarch64-linux`. The package follows NixOS 26.05 and brings Python 3.13 with it.
 
-## How it answers
+## What it does
 
-AINIX sorts a line into a question or a command.
+A question such as "How do I enable ssh?" searches your files, the manuals, nixpkgs at your NixOS revision, the NixOS wiki, Discourse, GitHub, and DuckDuckGo. A learning question can include YouTube. The answer cites the pieces that match and prints a preview of the change.
 
-A command such as `ainix install firefox` or `ainix rebuild` does not search the web. It reads this machine's NixOS config and prints a preview.
-
-A question takes the help path. The default is docs-first:
-
-1. Built-in notes in `help/knowledge_base.py` for packages, rebuilds, flakes, generations, and Home Manager.
-2. Nix on this computer. A dotted option goes to `nixos-option`. Anything else goes to `nix search nixpkgs`. Results are cached in `~/.local/share/ainix/`.
-3. DuckDuckGo HTML search, with `nixos` added to the query, only if Nix found nothing and the machine is online.
-4. Ollama, only if the three steps above miss. The prompt includes the layout, a short package-file excerpt when the question is about packages, the file hits, and any text already found. The model is told not to invent options or paths.
-
-After that, AINIX reads the NixOS files on this machine.
-
-- A how-to leads with plain words, the file to edit, and the rebuild command. The exact line and one [search.nixos.org](https://search.nixos.org/options) link follow.
-- A question that names an option, or asks for a default or a type, leads with the file, the line, and that same link.
-
-`search.nixos.org` is printed. That page is not downloaded.
-
-## What it reads on this machine
-
-The config directory is `/etc/nixos`, or `AINIX_NIXOS_CONFIG` if that is set. A `flake.nix` in the current directory is ignored.
-
-| Layout | Install names | Rebuild prints |
-|---|---|---|
-| One `configuration.nix` | that file | `sudo nixos-rebuild switch` |
-| Several modules | the file that assigns `environment.systemPackages` | `sudo nixos-rebuild switch` |
-| A flake | the package file inside it | `sudo nixos-rebuild switch --flake <dir>#<name>` |
-
-If several files assign `environment.systemPackages`, the main list is first. If a flake has several hosts and none matches `networking.hostName`, AINIX lists the names instead of inventing one.
-
-Words in the question are matched to option names in those files. `ssh` matches `services.openssh`. `printer` matches `services.printing`. The module filenames can be anything. Each machine gets its own paths.
-
-## Try it
+A command does not search the web. It reads the NixOS configuration on this machine and prints what it would do.
 
 ```bash
-ainix start
-ainix "How do I enable ssh?"
-ainix "services.openssh.enable default"
-ainix "How do I install a package?"
 ainix install firefox
 ainix rebuild
 ainix home
-ainix --history
+ainix start
+ainix packages
+```
+
+The terminal does not edit a file and does not build. Add `--execute` only when you want a previewed command to run.
+
+The window, `ainix-desktop`, asks the same questions. Apply writes the shown line only after you confirm. Build can then dry-build, switch the running system, or set the next boot. The window is GTK 4. It does not require GNOME.
+
+## Try it
+
+One question, without adding AINIX to your profile:
+
+```bash
+nix run github:jdnitrap/AINIX -- "How do I enable ssh?"
+```
+
+The window:
+
+```bash
+nix run github:jdnitrap/AINIX#desktop
 ```
 
 ## Install
 
-### Quick (curl)
-
-On NixOS this uses `nix profile`. Elsewhere it uses a local install if Python is present.
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jdnitrap/AINIX/main/install.sh | bash
-```
-
-### Standalone flake
-
-```bash
-nix run github:jdnitrap/AINIX -- help
 nix profile add github:jdnitrap/AINIX
-```
-
-### As an input in your system flake
-
-```nix
-{
-  inputs.ainix.url = "github:jdnitrap/AINIX";
-
-  outputs = { self, nixpkgs, ainix, ... }: {
-    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
-      modules = [
-        ainix.nixosModules.default
-        { services.ainix.enable = true; }
-      ];
-    };
-  };
-}
 ```
 
 Then:
 
 ```bash
-ainix start
+ainix "How do I enable ssh?"
+ainix "services.openssh.enable default"
+ainix "How do I install a package?"
+ainix-desktop
 ```
 
-## Optional local model
+To add AINIX to a NixOS flake, see [FLAKE_INSTALLATION.md](FLAKE_INSTALLATION.md).
 
-Model-first is off unless you turn it on. Docs stay first either way.
+```nix
+inputs.ainix.url = "github:jdnitrap/AINIX";
+```
+
+```nix
+imports = [ inputs.ainix.nixosModules.default ];
+
+services.ainix.enable = true;
+```
+
+## How it works
+
+AINIX sorts each line into a question or a command.
+
+A question gathers the sources above and keeps the pieces that share the same option. `ssh` matches `services.openssh`. `printer` matches `services.printing`. The answer leads with your file when that file already sets the option, then the suggested line and the pages that agree. `search.nixos.org` is named in the answer. That page is not downloaded.
+
+A command reads the configuration and stops at a preview.
+
+| Layout | Where packages are named | What `ainix rebuild` prints |
+|---|---|---|
+| One `configuration.nix` | that file | `sudo nixos-rebuild switch` |
+| Several modules | the file that assigns `environment.systemPackages` | `sudo nixos-rebuild switch` |
+| A flake | the package file inside it | `sudo nixos-rebuild switch --flake <dir>#<name>` |
+
+The configuration directory is `/etc/nixos`, or `AINIX_NIXOS_CONFIG` if that is set. A `flake.nix` in the current directory is ignored. If several files assign `environment.systemPackages`, the main list is first. If a flake has several hosts and none matches `networking.hostName`, AINIX lists the names instead of inventing one.
+
+Search results are cached in `~/.local/share/ainix/`.
+
+A local model is optional. Docs stay first unless you turn model-first on.
 
 ```bash
 mkdir -p ~/.config/ainix
-echo '{"model": "gemma2:9b", "model_first": true}' > ~/.config/ainix/config.json
+printf '%s\n' '{"model": "gemma2:9b", "model_first": true}' > ~/.config/ainix/config.json
 ```
 
-One run:
+Ollama is the local model. AINIX does not install it.
 
 ```bash
 ainix --model-first "How do I enable ssh?"
 ainix --docs-first "How do I enable ssh?"
-ainix --model gemma2:9b "How do I enable ssh?"
 ```
 
-Ollama is the local model, for NVIDIA, AMD, or CPU:
+## Problems
 
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull gemma2:9b
-```
+If something fails, or the answer is wrong, open an issue:
+
+https://github.com/jdnitrap/AINIX/issues
+
+Include the command you ran, the NixOS version (`nixos-version`), and the output AINIX printed. A configuration snippet helps when the question is about your files. Leave passwords and secrets out.
 
 ## Uninstall
-
-Nix profile:
 
 ```bash
 nix profile remove AINIX
 ```
 
-Curl install:
-
-```bash
-ainix uninstall
-```
-
-## More
-
-- `ainix help` shows usage
-- `man ainix` is the man page
-- `ainix --version` prints the version
+`ainix help` lists the commands. `man ainix` is the manual page.
