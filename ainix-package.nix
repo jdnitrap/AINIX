@@ -5,7 +5,6 @@
 , installShellFiles
 , makeDesktopItem
 , gtk4
-, libadwaita
 , gdk-pixbuf
 , pango
 , harfbuzz
@@ -28,11 +27,9 @@ let
     harfbuzz
     graphene
     glib
-    libadwaita
     gobject-introspection
   ];
   schemas = lib.concatStringsSep ":" [
-    "${libadwaita}/share/gsettings-schemas/${libadwaita.name}"
     "${gtk4}/share/gsettings-schemas/${gtk4.name}"
     "${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}"
   ];
@@ -71,7 +68,7 @@ stdenvNoCC.mkDerivation {
       --set PYTHONPATH "$out/share/ainix" \
       --set PYTHONUNBUFFERED 1 \
       --set GI_TYPELIB_PATH "${typelibs}" \
-      --prefix XDG_DATA_DIRS : "${schemas}:${libadwaita}/share:${gtk4}/share"
+      --prefix XDG_DATA_DIRS : "${schemas}:${gtk4}/share"
     installManPage ainix.1
     mkdir -p $out/share/applications
     cp ${desktopItem}/share/applications/*.desktop $out/share/applications/

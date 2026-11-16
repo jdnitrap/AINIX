@@ -13,11 +13,9 @@ let
     pkgs.harfbuzz
     pkgs.graphene
     pkgs.glib
-    pkgs.libadwaita
     pkgs.gobject-introspection
   ];
   schemas = pkgs.lib.concatStringsSep ":" [
-    "${pkgs.libadwaita}/share/gsettings-schemas/${pkgs.libadwaita.name}"
     "${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}"
     "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}"
   ];
@@ -26,14 +24,13 @@ pkgs.mkShell {
   packages = [
     pythonEnv
     pkgs.gtk4
-    pkgs.libadwaita
     pkgs.gobject-introspection
     pkgs.cacert
   ];
   shellHook = ''
     export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
     export GI_TYPELIB_PATH="${typelibs}''${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
-    export XDG_DATA_DIRS="${schemas}:${pkgs.libadwaita}/share:${pkgs.gtk4}/share''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+    export XDG_DATA_DIRS="${schemas}:${pkgs.gtk4}/share''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
     if [ -f "$PWD/ainix.py" ] && [ -d "$PWD/ainix_help" ]; then
       export AINIX_ROOT="$PWD"
     else

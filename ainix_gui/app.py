@@ -6,8 +6,7 @@ import threading
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import GLib, Gtk
 
 from ainix_gui.answer import answer_question
 from ainix_gui.changes import ApplyError, apply_edits, run_rebuild, sudo_needs_password
@@ -26,7 +25,47 @@ Apply writes only the line in the answer, and only after you confirm. A dry-buil
 """
 
 
-class AinixWindow(Adw.ApplicationWindow):
+def open_choice(parent, heading, body, responses, on_choice, extra=None, default="cancel"):
+    """Modal GTK dialog. responses are (name, label, style). style is suggested, destructive, or None."""
+    dialog = Gtk.Window(transient_for=parent, modal=True, destroy_with_parent=True)
+    dialog.set_title(heading)
+    dialog.set_resizable(False)
+    root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    root.set_margin_top(16)
+    root.set_margin_bottom(16)
+    root.set_margin_start(16)
+    root.set_margin_end(16)
+    text = Gtk.Label(label=body, wrap=True, xalign=0, selectable=True)
+    text.set_max_width_chars(56)
+    root.append(text)
+    if extra is not None:
+        root.append(extra)
+    row = Gtk.Box(spacing=8)
+    row.set_halign(Gtk.Align.END)
+    closed = {"done": False}
+
+    def finish(name):
+        if closed["done"]:
+            return
+        closed["done"] = True
+        on_choice(name)
+        dialog.destroy()
+
+    dialog.connect("close-request", lambda *_args: finish(default) or True)
+    for name, label, style in responses:
+        button = Gtk.Button(label=label)
+        if style == "suggested":
+            button.add_css_class("suggested-action")
+        elif style == "destructive":
+            button.add_css_class("destructive-action")
+        button.connect("clicked", lambda *_button, chosen=name: finish(chosen))
+        row.append(button)
+    root.append(row)
+    dialog.set_child(root)
+    dialog.present()
+
+
+class AinixWindow(Gtk.ApplicationWindow):
     def __init__(self, app, answer_fn):
         super().__init__(application=app, title="AINIX")
         self.answer_fn = answer_fn
@@ -39,9 +78,14 @@ class AinixWindow(Adw.ApplicationWindow):
         self._resolved = ("", "", "")
         self.set_default_size(880, 720)
 
-        header = Adw.HeaderBar()
-        title = Adw.WindowTitle.new("AINIX", "Nix and NixOS helper")
-        header.set_title_widget(title)
+        header = Gtk.HeaderBar()
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        title = Gtk.Label(label="AINIX")
+        subtitle = Gtk.Label(label="Nix and NixOS helper")
+        subtitle.add_css_class("dim-label")
+        title_box.append(title)
+        title_box.append(subtitle)
+        header.set_title_widget(title_box)
         self.apply_button = Gtk.Button(label="Apply")
         self.apply_button.set_sensitive(False)
         self.apply_button.connect("clicked", self.on_apply)
@@ -60,10 +104,11 @@ class AinixWindow(Adw.ApplicationWindow):
         header.pack_end(self.build_button)
         header.pack_end(self.apply_button)
 
-        banner = Adw.Banner.new(
-            "Apply writes the configuration after you confirm. Build installs the system, and can write a waiting change first."
+        banner = Gtk.Label(
+            label="Apply writes the configuration after you confirm. Build installs the system, and can write a waiting change first.",
+            wrap=True,
+            xalign=0,
         )
-        banner.set_revealed(True)
 
         self.question = Gtk.Entry()
         self.question.set_placeholder_text("How do I enable ssh?")
@@ -135,13 +180,8 @@ class AinixWindow(Adw.ApplicationWindow):
         self.stack.add_named(self.packages_panel, "packages")
         self._show_page("ask")
 
-        toolbar = Adw.ToolbarView()
-        toolbar.add_top_bar(header)
-        toolbar.set_content(self.stack)
-
-        self.toast_overlay = Adw.ToastOverlay()
-        self.toast_overlay.set_child(toolbar)
-        self.set_content(self.toast_overlay)
+        self.set_titlebar(header)
+        self.set_child(self.stack)
 
     def _show_page(self, name):
         self.page_name = name
@@ -232,7 +272,7 @@ class AinixWindow(Adw.ApplicationWindow):
         if not text:
             return
         self.get_clipboard().set(text)
-        self.toast_overlay.add_toast(Adw.Toast.new("Answer copied"))
+        self.status.set_text("Answer copied")
 
     def on_ask(self, *_ignored):
         if self.busy:
@@ -379,18 +419,10 @@ class AinixWindow(Adw.ApplicationWindow):
         plan = self._plan()
         if plan is None or not plan.edits:
             return
-        dialog = Adw.AlertDialog(heading="Write this change?", body=self._edit_body())
         host_box = self._host_dropdown() if plan.needs_host else None
-        if host_box is not None:
-            dialog.set_extra_child(host_box)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("write", "Write the file")
-        dialog.set_response_appearance("write", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
 
-        def finish(_source, result):
-            if dialog.choose_finish(result) != "write":
+        def finish(response):
+            if response != "write":
                 return
             try:
                 host = self._dropdown_text(host_box)
@@ -408,7 +440,14 @@ class AinixWindow(Adw.ApplicationWindow):
             self._append("\nWrote " + ", ".join(written) + "\n")
             self._begin_rebuild(self._resolved[0], afterwards="choose")
 
-        dialog.choose(self, None, finish)
+        open_choice(
+            self,
+            "Write this change?",
+            self._edit_body(),
+            [("cancel", "Cancel", None), ("write", "Write the file", "destructive")],
+            finish,
+            extra=host_box,
+        )
 
     def on_build(self, *_ignored):
         plan = self._plan()
@@ -420,52 +459,29 @@ class AinixWindow(Adw.ApplicationWindow):
         self._choose_build(plan)
 
     def _build_with_edit(self, plan):
-        dialog = Adw.AlertDialog(
-            heading="Write the change before installing?",
-            body=(
-                "A configuration change is waiting. Write it, then install. "
-                "Or install the files as they are and leave that change for later."
-            ),
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("current", "Install as it is")
-        dialog.add_response("write", "Write, then install")
-        dialog.set_response_appearance("write", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-
-        def finish(_source, result):
-            response = dialog.choose_finish(result)
+        def finish(response):
             if response == "write":
                 self._start_write()
             elif response == "current":
                 self._choose_build(plan)
 
-        dialog.choose(self, None, finish)
+        open_choice(
+            self,
+            "Write the change before installing?",
+            "A configuration change is waiting. Write it, then install. "
+            "Or install the files as they are and leave that change for later.",
+            [
+                ("cancel", "Cancel", None),
+                ("current", "Install as it is", None),
+                ("write", "Write, then install", "suggested"),
+            ],
+            finish,
+        )
 
     def _choose_build(self, plan):
-        dialog = Adw.AlertDialog(
-            heading="Build this system?",
-            body=(
-                "Dry-build only checks. Switch replaces the running system. "
-                "Boot builds the next startup and leaves this session as it is. "
-                "No file is edited."
-            ),
-        )
         host_box = self._host_dropdown() if plan.needs_host else None
-        if host_box is not None:
-            dialog.set_extra_child(host_box)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("dry", "Dry-build")
-        dialog.add_response("boot", "Boot")
-        dialog.add_response("switch", "Switch")
-        dialog.set_response_appearance("boot", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_response_appearance("switch", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
 
-        def finish(_source, result):
-            response = dialog.choose_finish(result)
+        def finish(response):
             if response not in {"dry", "boot", "switch"}:
                 return
             try:
@@ -478,7 +494,21 @@ class AinixWindow(Adw.ApplicationWindow):
             afterwards = "choose" if response == "dry" else "stop"
             self._begin_rebuild(command, afterwards)
 
-        dialog.choose(self, None, finish)
+        open_choice(
+            self,
+            "Build this system?",
+            "Dry-build only checks. Switch replaces the running system. "
+            "Boot builds the next startup and leaves this session as it is. "
+            "No file is edited.",
+            [
+                ("cancel", "Cancel", None),
+                ("dry", "Dry-build", None),
+                ("boot", "Boot", "suggested"),
+                ("switch", "Switch", "destructive"),
+            ],
+            finish,
+            extra=host_box,
+        )
 
     def _begin_rebuild(self, command, afterwards):
         self._set_busy(True)
@@ -507,26 +537,23 @@ class AinixWindow(Adw.ApplicationWindow):
         return False
 
     def _ask_password(self, command, afterwards):
-        dialog = Adw.AlertDialog(
-            heading="Sudo password",
-            body="This rebuild needs sudo. The password is used for this command and is not saved.",
-        )
         entry = Gtk.PasswordEntry()
-        dialog.set_extra_child(entry)
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("ok", "Continue")
-        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
 
-        def finish(_source, result):
-            if dialog.choose_finish(result) != "ok":
+        def finish(response):
+            if response != "ok":
                 self._set_busy(False)
                 self.status.set_text("Cancelled before the rebuild.")
                 return
             self._launch(command, entry.get_text(), afterwards)
 
-        dialog.choose(self, None, finish)
+        open_choice(
+            self,
+            "Sudo password",
+            "This rebuild needs sudo. The password is used for this command and is not saved.",
+            [("cancel", "Cancel", None), ("ok", "Continue", "suggested")],
+            finish,
+            extra=entry,
+        )
 
     def _launch(self, command, password, afterwards):
         self._set_busy(True)
@@ -561,20 +588,7 @@ class AinixWindow(Adw.ApplicationWindow):
         return False
 
     def _choose_activation(self):
-        dialog = Adw.AlertDialog(
-            heading="Dry-build succeeded",
-            body="Switch replaces the running system now. Boot builds the next startup and leaves this session as it is.",
-        )
-        dialog.add_response("later", "Not now")
-        dialog.add_response("boot", "Boot")
-        dialog.add_response("switch", "Switch")
-        dialog.set_response_appearance("boot", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_response_appearance("switch", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("later")
-        dialog.set_close_response("later")
-
-        def finish(_source, result):
-            response = dialog.choose_finish(result)
+        def finish(response):
             if response == "boot":
                 self._begin_rebuild(self._resolved[2], afterwards="stop")
             elif response == "switch":
@@ -582,7 +596,18 @@ class AinixWindow(Adw.ApplicationWindow):
             else:
                 self.status.set_text("Dry-build succeeded. Nothing was switched or set to boot.")
 
-        dialog.choose(self, None, finish)
+        open_choice(
+            self,
+            "Dry-build succeeded",
+            "Switch replaces the running system now. Boot builds the next startup and leaves this session as it is.",
+            [
+                ("later", "Not now", None),
+                ("boot", "Boot", "suggested"),
+                ("switch", "Switch", "destructive"),
+            ],
+            finish,
+            default="later",
+        )
 
 
 def existing_file(path):
@@ -594,7 +619,7 @@ def existing_file(path):
     return None
 
 
-class AinixApp(Adw.Application):
+class AinixApp(Gtk.Application):
     def __init__(self, answer_fn=None, after_present=None):
         super().__init__(application_id="org.jdnitrap.Ainix")
         self.answer_fn = answer_fn or answer_question
@@ -627,9 +652,6 @@ def self_test():
         )
 
     def after(window):
-        probe = Adw.AlertDialog(heading="probe", body="probe")
-        probe.set_extra_child(Gtk.PasswordEntry())
-        probe.add_response("cancel", "Cancel")
         window._show_page("packages")
         if "Refresh" not in window.packages_panel.status.get_text():
             print(window.packages_panel.status.get_text())
