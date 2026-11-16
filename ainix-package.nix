@@ -20,13 +20,14 @@ let
     ps.pygobject3
     ps.pycairo
   ]);
+  # pango and glib default to their bin outputs, which have no typelibs.
   typelibs = lib.makeSearchPath "lib/girepository-1.0" [
     gtk4
     gdk-pixbuf
-    pango
+    pango.out
     harfbuzz
     graphene
-    glib
+    glib.out
     gobject-introspection
   ];
   schemas = lib.concatStringsSep ":" [

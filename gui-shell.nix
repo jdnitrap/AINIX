@@ -6,13 +6,14 @@ let
     ps.pycairo
     ps.brotli
   ]);
+  # pango and glib default to their bin outputs, which have no typelibs.
   typelibs = pkgs.lib.makeSearchPath "lib/girepository-1.0" [
     pkgs.gtk4
     pkgs.gdk-pixbuf
-    pkgs.pango
+    pkgs.pango.out
     pkgs.harfbuzz
     pkgs.graphene
-    pkgs.glib
+    pkgs.glib.out
     pkgs.gobject-introspection
   ];
   schemas = pkgs.lib.concatStringsSep ":" [
