@@ -18,11 +18,11 @@
 
         apps.default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/ainix";
-        };
-        apps.desktop = {
-          type = "app";
           program = "${self.packages.${system}.default}/bin/ainix-desktop";
+        };
+        apps.cli = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/ainix";
         };
 
         devShells.default = import ./shell.nix { inherit pkgs; };

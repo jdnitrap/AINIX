@@ -10,18 +10,18 @@ Works on `x86_64-linux` and `aarch64-linux`.
 nix profile add github:jdnitrap/AINIX
 ```
 
-`ainix` is the terminal helper. `ainix-desktop` opens the window.
+That installs the window. AINIX appears in the application menu. The terminal helper is the `ainix` command, for anyone who wants it.
 
-## Run without installing
+## Run the window without installing
 
 ```bash
-nix run github:jdnitrap/AINIX -- "How do I enable ssh?"
+nix run github:jdnitrap/AINIX
 ```
 
-The window:
+The terminal helper:
 
 ```bash
-nix run github:jdnitrap/AINIX#desktop
+nix run github:jdnitrap/AINIX#cli -- "How do I enable ssh?"
 ```
 
 ## Add the module to a NixOS flake

@@ -35,13 +35,15 @@ let
     "${gsettings-desktop-schemas}/share/gsettings-schemas/${gsettings-desktop-schemas.name}"
   ];
   desktopItem = makeDesktopItem {
-    name = "ainix";
+    name = "org.jdnitrap.Ainix";
     desktopName = "AINIX";
     genericName = "NixOS helper";
     comment = "Ask Nix and NixOS questions without a terminal";
     exec = "ainix-desktop";
-    icon = "preferences-system";
-    categories = [ "Development" "Utility" ];
+    icon = "ainix";
+    terminal = false;
+    startupNotify = true;
+    categories = [ "Utility" ];
     startupWMClass = "org.jdnitrap.Ainix";
     keywords = [ "nix" "nixos" "ainix" ];
   };
@@ -71,8 +73,12 @@ stdenvNoCC.mkDerivation {
       --set GI_TYPELIB_PATH "${typelibs}" \
       --prefix XDG_DATA_DIRS : "${schemas}:${gtk4}/share"
     installManPage ainix.1
-    mkdir -p $out/share/applications
-    cp ${desktopItem}/share/applications/*.desktop $out/share/applications/
+    install -Dm644 ${./ainix.svg} $out/share/icons/hicolor/scalable/apps/ainix.svg
+    install -Dm644 ${desktopItem}/share/applications/org.jdnitrap.Ainix.desktop $out/share/applications/org.jdnitrap.Ainix.desktop
+    substituteInPlace $out/share/applications/org.jdnitrap.Ainix.desktop \
+      --replace-fail 'Exec=ainix-desktop' "Exec=$out/bin/ainix-desktop" \
+      --replace-fail 'Categories=Utility' 'Categories=Utility;' \
+      --replace-fail 'Keywords=nix;nixos;ainix' 'Keywords=nix;nixos;ainix;'
     runHook postInstall
   '';
 
@@ -80,7 +86,7 @@ stdenvNoCC.mkDerivation {
     description = "AI-Native NixOS Integration - Help and Control for NixOS";
     homepage = "https://github.com/jdnitrap/AINIX";
     license = lib.licenses.mit;
-    mainProgram = "ainix";
+    mainProgram = "ainix-desktop";
     platforms = lib.platforms.linux;
   };
 }

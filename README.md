@@ -26,16 +26,10 @@ The window, `ainix-desktop`, asks the same questions. Apply writes the shown lin
 
 ## Try it
 
-One question, without adding AINIX to your profile:
+Open the window without adding AINIX to your profile:
 
 ```bash
-nix run github:jdnitrap/AINIX -- "How do I enable ssh?"
-```
-
-The window:
-
-```bash
-nix run github:jdnitrap/AINIX#desktop
+nix run github:jdnitrap/AINIX
 ```
 
 ## Install
@@ -44,13 +38,18 @@ nix run github:jdnitrap/AINIX#desktop
 nix profile add github:jdnitrap/AINIX
 ```
 
-Then:
+AINIX then shows up in the application menu as a normal program. Open that icon. It is the window.
+
+The terminal helper is there if you want it:
 
 ```bash
 ainix "How do I enable ssh?"
-ainix "services.openssh.enable default"
-ainix "How do I install a package?"
-ainix-desktop
+```
+
+Or, without installing:
+
+```bash
+nix run github:jdnitrap/AINIX#cli -- "How do I enable ssh?"
 ```
 
 To add AINIX to a NixOS flake, see [FLAKE_INSTALLATION.md](FLAKE_INSTALLATION.md).
