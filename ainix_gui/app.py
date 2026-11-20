@@ -11,8 +11,10 @@ from gi.repository import GLib, Gtk
 from ainix_gui.answer import answer_question
 from ainix_gui.changes import ApplyError, apply_edits, run_rebuild, sudo_needs_password
 from ainix_gui.packages import PackagesPanel
+from ainix_gui.toggle import OPTION, documentation_plan, find_documentation_enable
 from ainix_help.context import config_root
 from ainix_help.plan import button_state
+from ainix_help.search import plain_bool
 
 
 INTRO = """\
@@ -76,6 +78,7 @@ class AinixWindow(Gtk.ApplicationWindow):
         self.package_text = ""
         self.page_name = "ask"
         self._resolved = ("", "", "")
+        self._toggle_guard = False
         self.set_default_size(880, 720)
 
         header = Gtk.HeaderBar()
@@ -136,6 +139,26 @@ class AinixWindow(Gtk.ApplicationWindow):
         config_label = Gtk.Label(label="Configuration directory", xalign=0)
         config_label.add_css_class("heading")
 
+        self.doc_switch = Gtk.Switch()
+        self.doc_switch.set_valign(Gtk.Align.CENTER)
+        self.doc_switch.connect("state-set", self.on_doc_toggle)
+        doc_label = Gtk.Label(label=OPTION, xalign=0)
+        doc_label.set_hexpand(True)
+        self.doc_where = Gtk.Label(label="", xalign=0)
+        self.doc_where.add_css_class("dim-label")
+        doc_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        doc_text.set_hexpand(True)
+        doc_text.append(doc_label)
+        doc_text.append(self.doc_where)
+        doc_row = Gtk.Box(spacing=12)
+        doc_row.append(doc_text)
+        doc_row.append(self.doc_switch)
+        doc_row.add_css_class("card")
+        doc_row.set_margin_top(4)
+        doc_row.set_margin_bottom(4)
+        doc_row.set_margin_start(12)
+        doc_row.set_margin_end(12)
+
         self.answer = Gtk.TextView()
         self.answer.set_editable(False)
         self.answer.set_cursor_visible(False)
@@ -170,7 +193,9 @@ class AinixWindow(Gtk.ApplicationWindow):
         page.append(question_row)
         page.append(config_label)
         page.append(config_row)
+        page.append(doc_row)
         page.append(scroll)
+        self._load_doc_toggle()
         page.append(status_row)
 
         self.packages_panel = PackagesPanel(on_ask=self.on_package_ask, on_select=self.on_package_selected)
@@ -201,6 +226,67 @@ class AinixWindow(Gtk.ApplicationWindow):
         selected = self.packages_panel.selected
         if selected is not None and not self.busy:
             self.on_package_selected(selected)
+        self._load_doc_toggle()
+
+    def _load_doc_toggle(self):
+        edit = find_documentation_enable(self.config_entry.get_text().strip())
+        self._toggle_guard = True
+        if edit is None:
+            self.doc_switch.set_active(False)
+            self.doc_switch.set_sensitive(False)
+            self.doc_where.set_text("Not set in this configuration directory.")
+        else:
+            self.doc_switch.set_sensitive(True)
+            self.doc_switch.set_active(plain_bool(edit.old_value) == "true")
+            self.doc_where.set_text(f"{edit.where} is {plain_bool(edit.old_value)}")
+        self._toggle_guard = False
+
+    def on_doc_toggle(self, _switch, state):
+        if self._toggle_guard or self.busy:
+            return True
+        new_value = "true" if state else "false"
+        plan = documentation_plan(self.config_entry.get_text().strip(), new_value)
+        if plan is None:
+            return False
+        if plan.needs_host:
+            self.status.set_text("This flake has more than one host. The toggle does not pick one.")
+            return True
+        self._confirm_doc_switch(plan)
+        return True
+
+    def _confirm_doc_switch(self, plan):
+        edit = plan.edits[0]
+
+        def finish(response):
+            if response != "switch":
+                self._load_doc_toggle()
+                return
+            try:
+                self._resolved = plan.with_host("")
+                written = apply_edits(plan.edits, self.config_entry.get_text().strip())
+            except (ApplyError, ValueError, OSError) as exc:
+                self._load_doc_toggle()
+                self.status.set_text(str(exc))
+                return
+            self._show_page("ask")
+            self._append("\nWrote " + ", ".join(written) + "\n")
+            self._load_doc_toggle()
+            self._begin_rebuild(self._resolved[0], afterwards="switch")
+
+        open_choice(
+            self,
+            "Write this and switch?",
+            (
+                f"{edit.where}\n"
+                f"- {edit.option} = {edit.old_value};\n"
+                f"+ {edit.option} = {edit.new_value};\n\n"
+                "A dry-build runs first. When it succeeds, this runs:\n"
+                f"{plan.switch}\n\n"
+                "Switch activates that generation in this session. You stay logged in."
+            ),
+            [("cancel", "Cancel", None), ("switch", "Write and switch", "destructive")],
+            finish,
+        )
 
     def on_package_selected(self, package):
         if package is None:
@@ -580,6 +666,10 @@ class AinixWindow(Gtk.ApplicationWindow):
             return False
         if code != 0:
             self.status.set_text("The build failed. The running system was not switched.")
+            return False
+        if afterwards == "switch":
+            self.status.set_text("Dry-build succeeded. Switching. You stay logged in.")
+            self._begin_rebuild(self._resolved[1], afterwards="stop")
             return False
         if afterwards != "choose":
             self.status.set_text("Build finished. Nothing further was started.")
